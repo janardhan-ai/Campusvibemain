@@ -11,7 +11,9 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
-  Vibration
+  Vibration,
+  StatusBar,
+  SafeAreaView
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { HomeStackParamList } from '../types';
@@ -22,15 +24,12 @@ import { Message } from '../data/messages';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'ChatDetail'>;
 
-// --- EXTENDED TYPES FOR UI ---
-// Extending the base Message type to support local-only features like 'status'
 interface EnhancedMessage extends Message {
   status?: 'sent' | 'delivered' | 'read';
   type?: 'text' | 'image';
   replyTo?: EnhancedMessage;
 }
 
-// Helper to group messages by date
 const getRelativeDate = (dateString: string) => {
   const date = new Date(dateString);
   const now = new Date();
@@ -47,7 +46,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   const { currentUser, messages } = useApp();
   const allChats = messages || []; 
   
-  // --- RECIPIENT RESOLVER ---
   let recipient = params.recipient;
   if (!recipient && params.userId) recipient = { id: params.userId, name: params.userName, avatar: params.userAvatar, username: 'User' };
   if (!recipient && params.chatId) {
@@ -59,23 +57,20 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
   const chatId = params.chatId;
 
-  // --- STATE ---
   const [currentMessages, setCurrentMessages] = useState<EnhancedMessage[]>([]);
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
-  const [isTyping, setIsTyping] = useState(false); // New: Typing Indicator
-  const [replyingTo, setReplyingTo] = useState<EnhancedMessage | null>(null); // New: Reply State
+  const [isTyping, setIsTyping] = useState(false); 
+  const [replyingTo, setReplyingTo] = useState<EnhancedMessage | null>(null); 
   
   const flatListRef = useRef<FlatList>(null);
 
-  // Hide Tab Bar
   useEffect(() => {
     const parent = navigation.getParent();
     parent?.setOptions({ tabBarStyle: { display: 'none' } });
     return () => parent?.setOptions({ tabBarStyle: { height: 56, paddingBottom: 6, paddingTop: 6, display: 'flex' } });
   }, [navigation]);
 
-  // Load Messages
   useEffect(() => {
     let targetMessages: EnhancedMessage[] = [];
     if (chatId) {
@@ -90,21 +85,41 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
   }, [chatId, recipient.id]);
 
-  // --- ACTIONS ---
+  // --- BUTTON HANDLERS ---
+
+  const handleAttachment = () => {
+    Alert.alert("Attachment", "Choose an option", [
+      { text: "Document", onPress: () => console.log("Doc") },
+      { text: "Gallery", onPress: () => console.log("Gallery") },
+      { text: "Cancel", style: "cancel" }
+    ]);
+  };
+
+  const handleCamera = () => {
+    Alert.alert("Camera", "Opening Camera...");
+  };
+
+  const handleMic = () => {
+    Vibration.vibrate(50);
+    Alert.alert("Microphone", "Hold to record audio (Feature coming soon)");
+  };
 
   const handleSendMessage = () => {
     if (!messageText.trim()) return;
+
+    // Use current user avatar or a default fallback
+    const myAvatar = currentUser?.avatar || 'https://i.pravatar.cc/150?img=11';
 
     const newMessage: EnhancedMessage = {
       id: Date.now().toString(),
       conversation_id: chatId || 'temp_id',
       sender_id: currentUser?.id || 'current-user',
       sender_name: currentUser?.name || 'You',
-      sender_avatar: currentUser?.avatar || '',
+      sender_avatar: myAvatar, // Ensure this is set!
       content: messageText,
       is_read: false,
       created_at: new Date().toISOString(),
-      status: 'sent', // Initially sent
+      status: 'sent', 
       replyTo: replyingTo || undefined
     };
 
@@ -112,7 +127,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     setMessageText('');
     setReplyingTo(null);
     
-    // Simulate "Delivered" then "Read" status updates
+    // Simulate Status Updates
     setTimeout(() => {
         setCurrentMessages(prev => prev.map(m => m.id === newMessage.id ? {...m, status: 'delivered'} : m));
     }, 1000);
@@ -121,9 +136,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
         setCurrentMessages(prev => prev.map(m => m.id === newMessage.id ? {...m, status: 'read'} : m));
     }, 2500);
 
-    // Simulate Reply from other user
     simulateIncomingMessage();
-
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
@@ -156,11 +169,9 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   };
 
   const navigateToProfile = () => {
-      // @ts-ignore - assuming Profile screen can handle 'user' param
+      // @ts-ignore 
       navigation.navigate('Profile', { user: recipient });
   };
-
-  // --- RENDER HELPERS ---
 
   const formatTime = (dateString: string) => {
     return new Date(dateString).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
@@ -174,9 +185,9 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
   const renderMessageItem = ({ item, index }: { item: EnhancedMessage; index: number }) => {
     const isMyMessage = item.sender_id === currentUser?.id;
+    // Show avatar if it's the last message in a group
     const showAvatar = index === currentMessages.length - 1 || currentMessages[index + 1]?.sender_id !== item.sender_id;
     
-    // Date Header Logic
     const currentDate = getRelativeDate(item.created_at);
     const prevDate = index > 0 ? getRelativeDate(currentMessages[index - 1].created_at) : null;
     const showDateHeader = currentDate !== prevDate;
@@ -190,20 +201,19 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             onLongPress={() => handleLongPress(item)}
             style={[styles.messageRow, isMyMessage ? styles.rowRight : styles.rowLeft]}
         >
-          {/* Avatar (Left) */}
+          {/* LEFT AVATAR (Received) */}
           {!isMyMessage && (
              <View style={styles.avatarContainer}>
-                 {showAvatar && <Image source={{ uri: item.sender_avatar }} style={styles.avatar} />}
+                 {showAvatar ? <Image source={{ uri: item.sender_avatar }} style={styles.avatar} /> : <View style={{width: 28}} />}
              </View>
           )}
 
-          {/* Bubble */}
+          {/* BUBBLE */}
           <View style={[
               styles.bubble, 
               isMyMessage ? styles.bubbleRight : styles.bubbleLeft,
               !showAvatar && (isMyMessage ? styles.bubbleRightGroup : styles.bubbleLeftGroup)
           ]}>
-             {/* Reply Context */}
              {item.replyTo && (
                  <View style={styles.replyContext}>
                      <View style={styles.replyBar} />
@@ -222,14 +232,21 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                  </Text>
                  {isMyMessage && (
                      <Ionicons 
-                        name={item.status === 'read' ? "checkmark-done" : item.status === 'delivered' ? "checkmark-done" : "checkmark"} 
+                        name={item.status === 'read' ? "checkmark-done" : "checkmark"} 
                         size={14} 
-                        color={item.status === 'read' ? '#4ade80' : 'rgba(255,255,255,0.7)'} 
+                        color={item.status === 'read' ? '#bbf7d0' : 'rgba(255,255,255,0.7)'} 
                         style={{ marginLeft: 4 }}
                      />
                  )}
              </View>
           </View>
+
+          {/* RIGHT AVATAR (Sent) - VISIBLE NOW */}
+          {isMyMessage && (
+             <View style={styles.avatarContainerRight}>
+                 {showAvatar ? <Image source={{ uri: item.sender_avatar }} style={styles.avatar} /> : <View style={{width: 28}} />}
+             </View>
+          )}
 
         </TouchableOpacity>
       </View>
@@ -237,12 +254,10 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
-      {/* 1. CLICKABLE HEADER */}
+    <View style={styles.mainContainer}>
+      {/* 1. STATUS BAR FIX */}
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+      
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
@@ -264,85 +279,95 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
         </TouchableOpacity>
       </View>
 
-      {/* 2. MESSAGE LIST */}
-      <FlatList
-        ref={flatListRef}
-        data={currentMessages}
-        keyExtractor={item => item.id}
-        renderItem={renderMessageItem}
-        contentContainerStyle={styles.listContent}
-        ListFooterComponent={
-            isTyping ? (
-                <View style={{ marginLeft: 50, marginBottom: 10 }}>
-                    <Text style={{ color: '#999', fontSize: 12, fontStyle: 'italic' }}>{recipient.name} is typing...</Text>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      >
+        <FlatList
+            ref={flatListRef}
+            data={currentMessages}
+            keyExtractor={item => item.id}
+            renderItem={renderMessageItem}
+            contentContainerStyle={styles.listContent}
+            ListFooterComponent={
+                isTyping ? (
+                    <View style={{ marginLeft: 50, marginBottom: 10 }}>
+                        <Text style={{ color: '#999', fontSize: 12, fontStyle: 'italic' }}>{recipient.name} is typing...</Text>
+                    </View>
+                ) : null
+            }
+            ListEmptyComponent={
+            loading ? null : (
+                <View style={styles.emptyState}>
+                <Ionicons name="chatbubble-ellipses-outline" size={64} color="#ddd" />
+                <Text style={styles.emptyText}>No messages yet</Text>
+                <Text style={styles.emptySub}>Start the conversation with {recipient.name}!</Text>
                 </View>
-            ) : null
-        }
-        ListEmptyComponent={
-          loading ? null : (
-            <View style={styles.emptyState}>
-              <Ionicons name="chatbubble-ellipses-outline" size={64} color="#ddd" />
-              <Text style={styles.emptyText}>No messages yet</Text>
-              <Text style={styles.emptySub}>Start the conversation with {recipient.name}!</Text>
-            </View>
-          )
-        }
-      />
+            )
+            }
+        />
 
-      {/* 3. INPUT AREA */}
-      <View style={styles.inputWrapper}>
-        {/* Reply Banner */}
-        {replyingTo && (
-            <View style={styles.replyBanner}>
-                <View style={{flex: 1}}>
-                    <Text style={styles.replyBannerTitle}>Replying to {replyingTo.sender_id === currentUser?.id ? 'Yourself' : replyingTo.sender_name}</Text>
-                    <Text style={styles.replyBannerText} numberOfLines={1}>{replyingTo.content}</Text>
+        {/* 3. INPUT AREA - FIXED PADDING */}
+        <View style={styles.inputWrapper}>
+            {replyingTo && (
+                <View style={styles.replyBanner}>
+                    <View style={{flex: 1}}>
+                        <Text style={styles.replyBannerTitle}>Replying to {replyingTo.sender_id === currentUser?.id ? 'Yourself' : replyingTo.sender_name}</Text>
+                        <Text style={styles.replyBannerText} numberOfLines={1}>{replyingTo.content}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setReplyingTo(null)}>
+                        <Ionicons name="close" size={20} color="#666" />
+                    </TouchableOpacity>
                 </View>
-                <TouchableOpacity onPress={() => setReplyingTo(null)}>
-                    <Ionicons name="close" size={20} color="#666" />
+            )}
+
+            <View style={styles.inputBar}>
+                {/* ATTACH BUTTON */}
+                <TouchableOpacity style={styles.attachBtn} onPress={handleAttachment}>
+                    <Ionicons name="add" size={28} color={theme.colors.primary} />
+                </TouchableOpacity>
+                
+                <View style={styles.inputFieldContainer}>
+                    <TextInput
+                        style={styles.input}
+                        placeholder="Message..."
+                        value={messageText}
+                        onChangeText={setMessageText}
+                        multiline
+                        maxLength={1000}
+                    />
+                    {/* CAMERA BUTTON */}
+                    <TouchableOpacity style={styles.mediaBtn} onPress={handleCamera}>
+                        <Ionicons name="camera-outline" size={24} color="#999" />
+                    </TouchableOpacity>
+                </View>
+
+                {/* MIC / SEND BUTTON */}
+                <TouchableOpacity 
+                    style={[styles.sendBtn, !messageText.trim() && styles.micBtn]} 
+                    onPress={messageText.trim() ? handleSendMessage : handleMic}
+                >
+                    {messageText.trim() ? (
+                        <Ionicons name="send" size={18} color="#fff" style={{ marginLeft: 2 }} />
+                    ) : (
+                        <Ionicons name="mic" size={22} color="#fff" />
+                    )}
                 </TouchableOpacity>
             </View>
-        )}
-
-        {/* Input Bar */}
-        <View style={styles.inputBar}>
-            <TouchableOpacity style={styles.attachBtn}>
-                <Ionicons name="add" size={24} color={theme.colors.primary} />
-            </TouchableOpacity>
-            
-            <View style={styles.inputFieldContainer}>
-                <TextInput
-                    style={styles.input}
-                    placeholder="Message..."
-                    value={messageText}
-                    onChangeText={setMessageText}
-                    multiline
-                    maxLength={1000}
-                />
-                <TouchableOpacity style={styles.mediaBtn}>
-                    <Ionicons name="camera-outline" size={22} color="#999" />
-                </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity 
-                style={[styles.sendBtn, !messageText.trim() && styles.sendBtnDisabled]} 
-                onPress={handleSendMessage}
-                disabled={!messageText.trim()}
-            >
-                {messageText.trim() ? (
-                    <Ionicons name="send" size={18} color="#fff" style={{ marginLeft: 2 }} />
-                ) : (
-                    <Ionicons name="mic-outline" size={22} color="#fff" />
-                )}
-            </TouchableOpacity>
         </View>
-      </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f2f4f7' }, // Standard chat background color
+  mainContainer: { 
+      flex: 1, 
+      backgroundColor: '#f2f4f7', 
+      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 // Fixes collapsed Header
+  },
+  container: { flex: 1 },
   center: { justifyContent: 'center', alignItems: 'center' },
   
   // HEADER
@@ -365,7 +390,6 @@ const styles = StyleSheet.create({
   // LIST
   listContent: { paddingVertical: 15, paddingHorizontal: 12 },
   
-  // DATE HEADER
   dateHeaderContainer: { alignItems: 'center', marginVertical: 12 },
   dateHeaderText: { 
       fontSize: 11, fontWeight: '600', color: '#666', backgroundColor: '#e5e7eb', 
@@ -378,7 +402,8 @@ const styles = StyleSheet.create({
   rowRight: { justifyContent: 'flex-end' },
   
   avatarContainer: { width: 28, marginRight: 8, paddingBottom: 4 },
-  avatar: { width: 28, height: 28, borderRadius: 14 },
+  avatarContainerRight: { width: 28, marginLeft: 8, paddingBottom: 4 },
+  avatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#ccc' },
   
   bubble: { 
       maxWidth: '75%', paddingHorizontal: 12, paddingVertical: 8, 
@@ -398,17 +423,19 @@ const styles = StyleSheet.create({
   timeLight: { color: 'rgba(255,255,255,0.7)' },
   timeDark: { color: '#999' },
 
-  // REPLY
   replyContext: { 
       backgroundColor: 'rgba(0,0,0,0.1)', padding: 6, borderRadius: 8, 
       marginBottom: 6, borderLeftWidth: 3, borderLeftColor: 'rgba(0,0,0,0.3)' 
   },
-  replyBar: { position: 'absolute' }, // Styling handled by borderLeft above
+  replyBar: { position: 'absolute' },
   replyName: { fontSize: 11, fontWeight: '700', color: 'rgba(0,0,0,0.6)', marginBottom: 2 },
   replyText: { fontSize: 12, color: 'rgba(0,0,0,0.5)' },
 
   // INPUT
-  inputWrapper: { backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee' },
+  inputWrapper: { 
+      backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee',
+      paddingBottom: Platform.OS === 'ios' ? 20 : 10 // Fixes collapsed input on bottom
+  },
   replyBanner: { 
       flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', 
       padding: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#ddd' 
@@ -416,21 +443,24 @@ const styles = StyleSheet.create({
   replyBannerTitle: { fontSize: 12, fontWeight: '700', color: theme.colors.primary },
   replyBannerText: { fontSize: 12, color: '#666' },
 
-  inputBar: { flexDirection: 'row', alignItems: 'flex-end', padding: 8 },
+  inputBar: { flexDirection: 'row', alignItems: 'flex-end', padding: 8, paddingHorizontal: 12 },
   attachBtn: { padding: 10, justifyContent: 'center', alignItems: 'center' },
   inputFieldContainer: { 
       flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#f2f4f7', 
-      borderRadius: 20, marginHorizontal: 5, paddingHorizontal: 12, minHeight: 40 
+      borderRadius: 24, marginHorizontal: 8, paddingHorizontal: 12, minHeight: 44, paddingVertical: 2
   },
-  input: { flex: 1, maxHeight: 100, fontSize: 15, paddingVertical: 8, color: '#000' },
-  mediaBtn: { padding: 5 },
+  input: { flex: 1, maxHeight: 100, fontSize: 16, paddingVertical: 8, color: '#000' },
+  mediaBtn: { padding: 8 },
   sendBtn: { 
-      width: 40, height: 40, borderRadius: 20, backgroundColor: theme.colors.primary, 
+      width: 44, height: 44, borderRadius: 22, backgroundColor: theme.colors.primary, 
+      justifyContent: 'center', alignItems: 'center', marginLeft: 4 
+  },
+  micBtn: { 
+      width: 44, height: 44, borderRadius: 22, backgroundColor: theme.colors.primary, // Or a different color like #f5f5f5 for inactive look
       justifyContent: 'center', alignItems: 'center', marginLeft: 4 
   },
   sendBtnDisabled: { backgroundColor: '#b0bec5' },
 
-  // EMPTY
   emptyState: { alignItems: 'center', marginTop: 100 },
   emptyText: { fontSize: 18, fontWeight: '700', color: '#888', marginTop: 10 },
   emptySub: { fontSize: 14, color: '#aaa' }
