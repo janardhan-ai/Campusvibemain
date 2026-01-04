@@ -16,7 +16,8 @@ import {
   Animated,
   Modal,
   Dimensions,
-  TouchableWithoutFeedback
+  TouchableWithoutFeedback,
+  GestureResponderEvent
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { HomeStackParamList } from '../types';
@@ -26,7 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Message } from '../data/messages';
 import * as ImagePicker from 'expo-image-picker'; 
 import { Video, ResizeMode, Audio } from 'expo-av'; 
-import * as Clipboard from 'expo-clipboard'; // Ensure: npx expo install expo-clipboard
+import * as Clipboard from 'expo-clipboard'; 
 
 const { width, height } = Dimensions.get('window');
 
@@ -80,18 +81,20 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   const [isTyping, setIsTyping] = useState(false); 
   const [replyingTo, setReplyingTo] = useState<EnhancedMessage | null>(null); 
   
-  // Modals State
+  // Modals & Menus
   const [fullScreenMedia, setFullScreenMedia] = useState<{ url: string, type: 'image' | 'video' } | null>(null);
-  const [selectedMessage, setSelectedMessage] = useState<EnhancedMessage | null>(null); // For Menu
+  
+  // POPUP MENU STATE
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [selectedMessage, setSelectedMessage] = useState<EnhancedMessage | null>(null);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0, alignRight: false });
 
-  // Recording State
+  // Recording & Playback
   const [isRecording, setIsRecording] = useState(false); 
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingAnim = useRef(new Animated.Value(0)).current; 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Playback State
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const playbackAnim = useRef(new Animated.Value(0)).current;
@@ -137,48 +140,61 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
   }, [chatId, recipient.id]);
 
-  // --- MENU ACTIONS ---
+  // --- POPUP MENU LOGIC ---
   
-  const handleLongPress = (message: EnhancedMessage) => {
+  const handleLongPress = (event: GestureResponderEvent, message: EnhancedMessage) => {
+    // Only show menu if not deleted
+    if (message.type === 'deleted') return;
+
     Vibration.vibrate(50);
-    // REPLACED ALERT WITH STATE UPDATE
-    setSelectedMessage(message); 
+    const { pageY, pageX } = event.nativeEvent;
+    
+    // Determine alignment (Left for received, Right for sent)
+    const isMyMessage = message.sender_id === currentUser?.id;
+    
+    // Calculate position
+    // If message is too low on screen, show menu ABOVE touch, else BELOW
+    const showAbove = pageY > height - 200;
+    
+    setMenuPosition({
+        top: showAbove ? pageY - 140 : pageY + 10, // Adjust offset
+        left: isMyMessage ? width - 180 : 20, // Align right or left
+        alignRight: isMyMessage
+    });
+
+    setSelectedMessage(message);
+    setMenuVisible(true);
   };
 
   const handleMenuAction = (action: 'reply' | 'copy' | 'delete') => {
+      setMenuVisible(false);
       if (!selectedMessage) return;
 
       if (action === 'reply') {
           setReplyingTo(selectedMessage);
-          setSelectedMessage(null);
       } 
       else if (action === 'copy') {
           if (selectedMessage.type === 'text') {
               Clipboard.setStringAsync(selectedMessage.content);
           }
-          setSelectedMessage(null);
       }
       else if (action === 'delete') {
-          // Keep delete confirmation, but trigger it from the menu
           const isMyMessage = selectedMessage.sender_id === currentUser?.id;
           handleDeleteConfirm(selectedMessage, isMyMessage);
-          setSelectedMessage(null);
       }
+      setSelectedMessage(null);
   };
 
   const handleDeleteConfirm = (message: EnhancedMessage, isMyMessage: boolean) => {
-      if (isMyMessage) {
-          Alert.alert("Delete Message?", "Choose an option", [
+      Alert.alert(
+          "Delete Message?", 
+          isMyMessage ? "Choose an option" : "Remove for yourself only", 
+          [
               { text: "Delete for me", onPress: () => deleteForMe(message.id) },
-              { text: "Delete for everyone", onPress: () => deleteForEveryone(message.id), style: "destructive" },
+              isMyMessage ? { text: "Delete for everyone", onPress: () => deleteForEveryone(message.id), style: "destructive" } : { text: "", style: "cancel" }, // Hack to hide option
               { text: "Cancel", style: "cancel" }
-          ]);
-      } else {
-          Alert.alert("Delete Message?", "Remove from your chat?", [
-              { text: "Delete for me", onPress: () => deleteForMe(message.id), style: "destructive" },
-              { text: "Cancel", style: "cancel" }
-          ]);
-      }
+          ].filter(o => o.text !== "") as any
+      );
   };
 
   const deleteForMe = (messageId: string) => {
@@ -254,12 +270,29 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
   // --- MEDIA HANDLERS ---
   const handleMediaPress = (url: string, type: 'image' | 'video') => { setFullScreenMedia({ url, type }); };
-  const openGallery = async () => { /* Logic */ };
-  const openCamera = async () => { /* Logic */ };
+  const openGallery = async () => { 
+    try {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') return;
+        const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.All, quality: 1 });
+        if (!result.canceled) {
+            const asset = result.assets[0];
+            const type = asset.type === 'video' ? 'video' : 'image';
+            sendGenericMessage(type, type === 'video' ? 'Video' : 'Photo', { mediaUrl: asset.uri });
+        }
+    } catch (e) {}
+  };
+  const openCamera = async () => { 
+    try {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') return;
+        const result = await ImagePicker.launchCameraAsync({ quality: 1 });
+        if (!result.canceled) sendGenericMessage('image', 'Photo', { mediaUrl: result.assets[0].uri });
+    } catch (e) {}
+  };
   
-  // (Keeping existing implementations for brevity - assume they are here as in previous steps)
-  // ... Paste previous openGallery, openCamera, startRecording, stopRecording, handlePlayAudio logic here ...
-   const startRecording = async () => {
+  // --- RECORDING & AUDIO ---
+  const startRecording = async () => {
       try {
           const perm = await Audio.requestPermissionsAsync();
           if (perm.status !== "granted") return;
@@ -275,9 +308,9 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
           const { recording: newRecording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
           setRecording(newRecording);
       } catch (err) { console.error('Failed to start recording', err); }
-    };
-  
-    const stopRecording = async () => {
+  };
+
+  const stopRecording = async () => {
       setIsRecording(false);
       if (timerRef.current) clearInterval(timerRef.current);
       recordingAnim.stopAnimation();
@@ -294,9 +327,9 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
               sendGenericMessage('voice', 'Voice Message', { mediaUrl: uri, duration: durationStr });
           }
       } catch (error) { console.log("Error stopping recording", error); }
-    };
+  };
 
-    const handlePlayAudio = async (messageId: string, uri: string) => {
+  const handlePlayAudio = async (messageId: string, uri: string) => {
       if (playingAudioId === messageId) { await stopAudioPlayback(); return; }
       await stopAudioPlayback();
       try {
@@ -402,7 +435,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
           )}
           <TouchableOpacity 
               activeOpacity={0.8}
-              onLongPress={() => handleLongPress(item)}
+              onLongPress={(e) => handleLongPress(e, item)}
               style={[
                   styles.bubble, 
                   isMyMessage ? styles.bubbleRight : styles.bubbleLeft,
@@ -475,6 +508,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             contentContainerStyle={styles.listContent}
             ListFooterComponent={isTyping ? <View style={{ marginLeft: 50, marginBottom: 10 }}><Text style={{ color: '#999', fontSize: 12, fontStyle: 'italic' }}>{recipient.name} is typing...</Text></View> : null}
             ListEmptyComponent={loading ? null : <View style={styles.emptyState}><Ionicons name="chatbubble-ellipses-outline" size={64} color="#ddd" /><Text style={styles.emptyText}>No messages yet</Text></View>}
+            onScrollToIndexFailed={() => {}} 
         />
 
         {/* INPUT */}
@@ -548,28 +582,34 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
           </View>
       </Modal>
 
-      {/* MENU MODAL (ACTION SHEET REPLACEMENT) */}
-      <Modal visible={!!selectedMessage} transparent animationType="fade" onRequestClose={() => setSelectedMessage(null)}>
-        <TouchableWithoutFeedback onPress={() => setSelectedMessage(null)}>
+      {/* POPUP MENU (CONTEXT MENU) */}
+      <Modal visible={menuVisible} transparent animationType="fade" onRequestClose={() => setMenuVisible(false)}>
+        <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
             <View style={styles.menuOverlay}>
-                <View style={styles.menuContainer}>
-                    <View style={styles.menuHeader} />
-                    
-                    <TouchableOpacity style={styles.menuItem} onPress={() => handleMenuAction('reply')}>
-                        <Ionicons name="arrow-undo-outline" size={24} color="#333" />
-                        <Text style={styles.menuText}>Reply</Text>
+                <View style={[
+                    styles.popupMenu, 
+                    { 
+                        top: menuPosition.top, 
+                        // If aligned right, set right: 20, else left: 20
+                        left: menuPosition.alignRight ? undefined : 20,
+                        right: menuPosition.alignRight ? 20 : undefined
+                    }
+                ]}>
+                    <TouchableOpacity style={styles.popupItem} onPress={() => handleMenuAction('reply')}>
+                        <Text style={styles.popupText}>Reply</Text>
+                        <Ionicons name="arrow-undo-outline" size={18} color="#333" />
                     </TouchableOpacity>
-
+                    
                     {selectedMessage?.type === 'text' && (
-                        <TouchableOpacity style={styles.menuItem} onPress={() => handleMenuAction('copy')}>
-                            <Ionicons name="copy-outline" size={24} color="#333" />
-                            <Text style={styles.menuText}>Copy</Text>
+                        <TouchableOpacity style={styles.popupItem} onPress={() => handleMenuAction('copy')}>
+                            <Text style={styles.popupText}>Copy</Text>
+                            <Ionicons name="copy-outline" size={18} color="#333" />
                         </TouchableOpacity>
                     )}
 
-                    <TouchableOpacity style={styles.menuItem} onPress={() => handleMenuAction('delete')}>
-                        <Ionicons name="trash-outline" size={24} color="#FF3B30" />
-                        <Text style={[styles.menuText, { color: '#FF3B30' }]}>Delete</Text>
+                    <TouchableOpacity style={[styles.popupItem, { borderBottomWidth: 0 }]} onPress={() => handleMenuAction('delete')}>
+                        <Text style={[styles.popupText, { color: '#FF3B30' }]}>Delete</Text>
+                        <Ionicons name="trash-outline" size={18} color="#FF3B30" />
                     </TouchableOpacity>
                 </View>
             </View>
@@ -644,10 +684,32 @@ const styles = StyleSheet.create({
   fullScreenImage: { width: width, height: height * 0.8 },
   fullScreenClose: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 10 },
   
-  // MENU STYLES
-  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  menuContainer: { backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 40, padding: 20 },
-  menuHeader: { width: 40, height: 5, backgroundColor: '#ddd', borderRadius: 3, alignSelf: 'center', marginBottom: 20 },
-  menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  menuText: { fontSize: 16, fontWeight: '500', marginLeft: 15, color: '#333' }
+  // POPUP MENU STYLES
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.1)' }, // Slight dim, mostly clear
+  popupMenu: {
+      position: 'absolute',
+      width: 160,
+      backgroundColor: 'white',
+      borderRadius: 12,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.2,
+      shadowRadius: 8,
+      elevation: 5,
+      paddingVertical: 5
+  },
+  popupItem: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 12,
+      paddingHorizontal: 15,
+      borderBottomWidth: 1,
+      borderBottomColor: '#f0f0f0'
+  },
+  popupText: {
+      fontSize: 16,
+      color: '#333',
+      fontWeight: '500'
+  }
 });
