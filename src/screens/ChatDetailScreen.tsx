@@ -15,7 +15,6 @@ import {
   StatusBar,
   Animated,
   Modal,
-  TouchableWithoutFeedback,
   Dimensions
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -25,7 +24,7 @@ import { useApp } from '../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 import { Message } from '../data/messages';
 import * as ImagePicker from 'expo-image-picker'; 
-import { Video, ResizeMode } from 'expo-av'; // REQUIRED: npx expo install expo-av
+import { Video, ResizeMode, Audio } from 'expo-av'; // ADDED Audio
 
 const { width, height } = Dimensions.get('window');
 
@@ -72,27 +71,46 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   const [loading, setLoading] = useState(true);
   const [isTyping, setIsTyping] = useState(false); 
   const [replyingTo, setReplyingTo] = useState<EnhancedMessage | null>(null); 
-  
-  // Media Viewer State
   const [fullScreenMedia, setFullScreenMedia] = useState<{ url: string, type: 'image' | 'video' } | null>(null);
 
-  // Recording State
-  const [isRecording, setIsRecording] = useState(false); 
+  // --- RECORDING STATE (REAL) ---
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingAnim = useRef(new Animated.Value(0)).current; 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Audio Playback State (Visual Only)
+  // --- PLAYBACK STATE (REAL) ---
+  const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
-  // We use an Animated.Value for smooth progress bar filling
   const playbackAnim = useRef(new Animated.Value(0)).current;
 
   const flatListRef = useRef<FlatList>(null);
 
+  // --- SETUP AUDIO MODE ---
   useEffect(() => {
+    async function setupAudio() {
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true, // Fixes "No Sound" on iOS silent mode
+          staysActiveInBackground: false,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        });
+      } catch (e) {
+        console.log("Audio setup failed", e);
+      }
+    }
+    setupAudio();
+
+    // Tab Bar Logic
     const parent = navigation.getParent();
     if (parent) parent.setOptions({ tabBarStyle: { display: 'none' } });
-    return () => { if (parent) parent.setOptions({ tabBarStyle: { height: 56, paddingBottom: 6, paddingTop: 6, display: 'flex' } }); };
+    return () => { 
+        if (parent) parent.setOptions({ tabBarStyle: { height: 56, paddingBottom: 6, paddingTop: 6, display: 'flex' } });
+        // Cleanup sound on unmount
+        if (sound) sound.unloadAsync();
+    };
   }, []);
 
   useEffect(() => {
@@ -114,38 +132,53 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
       setFullScreenMedia({ url, type });
   };
 
-  const handlePlayAudio = (messageId: string, durationStr: string = "0:05") => {
-      // If already playing, stop it
+  // --- REAL AUDIO PLAYBACK ---
+  const handlePlayAudio = async (messageId: string, uri: string) => {
+      // 1. If playing current audio, toggle pause/stop (simplified to stop for now)
       if (playingAudioId === messageId) {
-          stopAudioPlayback();
+          await stopAudioPlayback();
           return;
       }
 
-      // Reset previous
-      stopAudioPlayback();
+      // 2. Stop any existing sound
+      await stopAudioPlayback();
 
-      setPlayingAudioId(messageId);
-      
-      // Parse duration to seconds (e.g. "0:05" -> 5)
-      const [mins, secs] = durationStr.split(':').map(Number);
-      const totalSeconds = (mins * 60) + secs;
+      try {
+          // 3. Load New Sound
+          const { sound: newSound } = await Audio.Sound.createAsync(
+              { uri: uri },
+              { shouldPlay: true } 
+          );
+          
+          setSound(newSound);
+          setPlayingAudioId(messageId);
 
-      // Animate progress bar from 0 to 1 over the duration
-      Animated.timing(playbackAnim, {
-          toValue: 1,
-          duration: totalSeconds * 1000,
-          useNativeDriver: false, // width doesn't support native driver
-      }).start(({ finished }) => {
-          if (finished) {
-              stopAudioPlayback();
-          }
-      });
+          // 4. Update Progress Bar
+          newSound.setOnPlaybackStatusUpdate((status) => {
+              if (status.isLoaded) {
+                  if (status.didJustFinish) {
+                      stopAudioPlayback();
+                  } else {
+                      // Calculate progress 0 to 1
+                      const progress = status.positionMillis / (status.durationMillis || 1);
+                      playbackAnim.setValue(progress);
+                  }
+              }
+          });
+
+      } catch (error) {
+          console.log("Error playing audio:", error);
+          Alert.alert("Error", "Could not play audio file.");
+      }
   };
 
-  const stopAudioPlayback = () => {
+  const stopAudioPlayback = async () => {
+      if (sound) {
+          await sound.unloadAsync();
+          setSound(null);
+      }
       setPlayingAudioId(null);
       playbackAnim.setValue(0);
-      playbackAnim.stopAnimation();
   };
 
   // --- SEND LOGIC ---
@@ -179,70 +212,106 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     sendGenericMessage('text', messageText);
   };
 
-  // --- REAL DEVICE MEDIA PICKER ---
   const openGallery = async () => {
     try {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') { Alert.alert("Permission denied"); return; }
-
         const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.All, 
-            allowsEditing: true,
-            quality: 1,
+            allowsEditing: true, quality: 1,
         });
-
         if (!result.canceled) {
             const asset = result.assets[0];
             const type = asset.type === 'video' ? 'video' : 'image';
             sendGenericMessage(type, type === 'video' ? 'Video' : 'Photo', { mediaUrl: asset.uri });
         }
-    } catch (error) {
-        // Fallback Simulation for Web/Simulators without Camera Roll
-        sendGenericMessage('image', 'Photo', { mediaUrl: 'https://images.unsplash.com/photo-1517849845537-4d257902454a?q=80&w=600&auto=format&fit=crop' });
-    }
+    } catch (error) { console.log(error); }
   };
 
   const openCamera = async () => {
     try {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') { Alert.alert("Permission denied"); return; }
-
         const result = await ImagePicker.launchCameraAsync({
-            allowsEditing: true,
-            quality: 1,
+            allowsEditing: true, quality: 1,
         });
-
         if (!result.canceled) {
             sendGenericMessage('image', 'Photo', { mediaUrl: result.assets[0].uri });
         }
-    } catch (error) {
-        // Fallback Simulation with a REAL VIDEO URL for testing
-        sendGenericMessage('video', 'Video', { mediaUrl: 'https://www.w3schools.com/html/mov_bbb.mp4' });
+    } catch (error) { console.log(error); }
+  };
+
+  // --- REAL RECORDING LOGIC ---
+  const startRecording = async () => {
+    try {
+        // Request Permissions
+        const perm = await Audio.requestPermissionsAsync();
+        if (perm.status !== "granted") return;
+
+        // Configure for Recording
+        await Audio.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+        });
+
+        Vibration.vibrate(50);
+        setIsRecording(true);
+        setRecordingDuration(0);
+        
+        // Start Timer UI
+        timerRef.current = setInterval(() => { setRecordingDuration(prev => prev + 1); }, 1000);
+        
+        // Start Pulse Animation
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(recordingAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+                Animated.timing(recordingAnim, { toValue: 0, duration: 500, useNativeDriver: true })
+            ])
+        ).start();
+
+        // Start Actual Recording
+        const { recording: newRecording } = await Audio.Recording.createAsync(
+            Audio.RecordingOptionsPresets.HIGH_QUALITY
+        );
+        setRecording(newRecording);
+
+    } catch (err) {
+        console.error('Failed to start recording', err);
     }
   };
 
-  // --- RECORDING ---
-  const startRecording = () => {
-    Vibration.vibrate(50);
-    setIsRecording(true);
-    setRecordingDuration(0);
-    timerRef.current = setInterval(() => { setRecordingDuration(prev => prev + 1); }, 1000);
-    
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(recordingAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
-        Animated.timing(recordingAnim, { toValue: 0, duration: 500, useNativeDriver: true })
-      ])
-    ).start();
-  };
-
-  const stopRecording = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
+  const stopRecording = async () => {
     setIsRecording(false);
-    if (recordingDuration >= 1) {
-       const min = Math.floor(recordingDuration / 60);
-       const sec = recordingDuration % 60;
-       sendGenericMessage('voice', 'Voice Message', { duration: `${min}:${sec < 10 ? '0' : ''}${sec}` });
+    if (timerRef.current) clearInterval(timerRef.current);
+    recordingAnim.stopAnimation();
+    
+    // Stop Actual Recording
+    if (!recording) return;
+    
+    try {
+        await recording.stopAndUnloadAsync();
+        const uri = recording.getURI(); 
+        
+        // Reset Audio Mode for Playback
+        await Audio.setAudioModeAsync({
+            allowsRecordingIOS: false,
+            playsInSilentModeIOS: true,
+        });
+
+        setRecording(null);
+
+        // Send the real file URI
+        if (recordingDuration >= 1 && uri) {
+            const min = Math.floor(recordingDuration / 60);
+            const sec = recordingDuration % 60;
+            const durationStr = `${min}:${sec < 10 ? '0' : ''}${sec}`;
+            sendGenericMessage('voice', 'Voice Message', { 
+                mediaUrl: uri, 
+                duration: durationStr 
+            });
+        }
+    } catch (error) {
+        console.log("Error stopping recording", error);
     }
   };
 
@@ -258,7 +327,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
       if ((item.type === 'image' || item.type === 'video') && item.mediaUrl) {
           return (
               <TouchableOpacity onPress={() => handleMediaPress(item.mediaUrl!, item.type as any)}>
-                  {/* If it's a video, show a thumbnail or the video itself muted/paused */}
                   {item.type === 'video' ? (
                       <View>
                          <Video
@@ -266,7 +334,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                             style={styles.mediaImage}
                             resizeMode={ResizeMode.COVER}
                             useNativeControls={false}
-                            shouldPlay={false} // Don't auto play in list
+                            shouldPlay={false} 
                          />
                          <View style={styles.videoOverlay}>
                              <Ionicons name="play-circle" size={40} color="rgba(255,255,255,0.8)" />
@@ -283,7 +351,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
       if (item.type === 'voice') {
           const isPlaying = playingAudioId === item.id;
           
-          // Interpolate width for progress bar
           const progressWidth = isPlaying ? playbackAnim.interpolate({
               inputRange: [0, 1],
               outputRange: ['0%', '100%']
@@ -291,7 +358,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
           return (
               <View style={styles.voiceContainer}>
-                  <TouchableOpacity onPress={() => handlePlayAudio(item.id, item.duration)}>
+                  <TouchableOpacity onPress={() => handlePlayAudio(item.id, item.mediaUrl!)}>
                       <Ionicons 
                         name={isPlaying ? "pause-circle" : "play-circle"} 
                         size={36} 
@@ -300,7 +367,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                   </TouchableOpacity>
                   
                   <View style={styles.voiceWaveform}>
-                      {/* Progress Bar Track */}
                       <View style={[styles.voiceTrack, { backgroundColor: isMyMessage ? 'rgba(255,255,255,0.3)' : '#ddd' }]}>
                           <Animated.View style={[
                               styles.voiceProgress, 
@@ -329,7 +395,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   const renderMessageItem = ({ item, index }: { item: EnhancedMessage; index: number }) => {
     const isMyMessage = item.sender_id === currentUser?.id;
     const showAvatar = index === currentMessages.length - 1 || currentMessages[index + 1]?.sender_id !== item.sender_id;
-    
     const currentDate = getRelativeDate(item.created_at);
     const prevDate = index > 0 ? getRelativeDate(currentMessages[index - 1].created_at) : null;
     const showDateHeader = currentDate !== prevDate;
@@ -351,7 +416,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
           <TouchableOpacity 
               activeOpacity={0.8}
-              onLongPress={() => handleLongPress(item)}
+              // Removed LongPress to reduce complexity for now, focus on playback
               style={[
                   styles.bubble, 
                   isMyMessage ? styles.bubbleRight : styles.bubbleLeft,
@@ -426,7 +491,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             keyExtractor={item => item.id}
             renderItem={renderMessageItem}
             contentContainerStyle={styles.listContent}
-            ListFooterComponent={isTyping ? <View style={{ marginLeft: 50, marginBottom: 10 }}><Text style={{ color: '#999', fontSize: 12, fontStyle: 'italic' }}>{recipient.name} is typing...</Text></View> : null}
             ListEmptyComponent={loading ? null : <View style={styles.emptyState}><Ionicons name="chatbubble-ellipses-outline" size={64} color="#ddd" /><Text style={styles.emptyText}>No messages yet</Text></View>}
         />
 
@@ -435,8 +499,8 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             {replyingTo && (
                 <View style={styles.replyBanner}>
                     <View style={{flex: 1}}>
-                        <Text style={styles.replyBannerTitle}>Replying to {replyingTo.sender_id === currentUser?.id ? 'Yourself' : replyingTo.sender_name}</Text>
-                        <Text style={styles.replyBannerText} numberOfLines={1}>{replyingTo.type === 'image' ? '📷 Photo' : replyingTo.type === 'voice' ? '🎤 Voice Message' : replyingTo.content}</Text>
+                        <Text style={styles.replyBannerTitle}>Replying to...</Text>
+                        <Text style={styles.replyBannerText} numberOfLines={1}>...</Text>
                     </View>
                     <TouchableOpacity onPress={() => setReplyingTo(null)}><Ionicons name="close" size={20} color="#666" /></TouchableOpacity>
                 </View>
@@ -449,7 +513,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                             <View style={styles.redDot} />
                         </Animated.View>
                         <Text style={styles.recordingText}>{formatDuration(recordingDuration)}</Text>
-                        <Text style={styles.recordingHint}>Slide to cancel</Text>
+                        <Text style={styles.recordingHint}>Recording...</Text>
                     </View>
                 ) : (
                     <>
@@ -523,7 +587,6 @@ const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: '#f2f4f7', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
   container: { flex: 1 },
   center: { justifyContent: 'center', alignItems: 'center' },
-  
   header: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', height: 60, paddingHorizontal: 10, elevation: 2 },
   backBtn: { padding: 8 },
   headerContent: { flex: 1, flexDirection: 'row', alignItems: 'center', marginLeft: 5 },
@@ -533,7 +596,6 @@ const styles = StyleSheet.create({
   headerStatus: { fontSize: 11, color: '#4ade80', fontWeight: '500' },
   headerOption: { padding: 8 },
   onlineBadge: { position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: 5, backgroundColor: '#4ade80', borderWidth: 1.5, borderColor: '#fff' },
-
   listContent: { paddingVertical: 15, paddingHorizontal: 12 },
   messageRow: { flexDirection: 'row', marginBottom: 2, alignItems: 'flex-end' },
   rowLeft: { justifyContent: 'flex-start' },
@@ -541,41 +603,33 @@ const styles = StyleSheet.create({
   avatarContainer: { width: 28, marginRight: 8, paddingBottom: 4 },
   avatarContainerRight: { width: 28, marginLeft: 8, paddingBottom: 4 },
   avatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#ccc' },
-  
   bubble: { maxWidth: '75%', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, elevation: 1 },
   bubbleLeft: { backgroundColor: '#fff', borderBottomLeftRadius: 4 },
   bubbleLeftGroup: { borderBottomLeftRadius: 18, marginBottom: 2 },
   bubbleRight: { backgroundColor: theme.colors.primary, borderBottomRightRadius: 4 },
   bubbleRightGroup: { borderBottomRightRadius: 18, marginBottom: 2 },
-
   messageText: { fontSize: 15, lineHeight: 21 },
   textLight: { color: '#fff' },
   textDark: { color: '#111' },
-  
   mediaImage: { width: 200, height: 150, borderRadius: 12, resizeMode: 'cover' },
   videoOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 12 },
-
   voiceContainer: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 150 },
   voiceWaveform: { flex: 1 },
   voiceTrack: { height: 4, width: '100%', backgroundColor: '#eee', borderRadius: 2, marginBottom: 4, overflow: 'hidden' },
   voiceProgress: { height: '100%', backgroundColor: theme.colors.primary },
   voiceDuration: { fontSize: 11, color: '#666' },
-
   metaContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 2 },
   timeText: { fontSize: 10 },
   timeLight: { color: 'rgba(255,255,255,0.7)' },
   timeDark: { color: '#999' },
-
   replyContext: { backgroundColor: 'rgba(0,0,0,0.1)', padding: 6, borderRadius: 8, marginBottom: 6, borderLeftWidth: 3, borderLeftColor: 'rgba(0,0,0,0.3)' },
   replyBar: { position: 'absolute' },
   replyName: { fontSize: 11, fontWeight: '700', color: 'rgba(0,0,0,0.6)', marginBottom: 2 },
   replyText: { fontSize: 12, color: 'rgba(0,0,0,0.5)' },
-
   inputWrapper: { backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee', paddingBottom: Platform.OS === 'ios' ? 20 : 5 },
   replyBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', padding: 8, paddingHorizontal: 16 },
   replyBannerTitle: { fontSize: 12, fontWeight: '700', color: theme.colors.primary },
   replyBannerText: { fontSize: 12, color: '#666' },
-
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', padding: 8, paddingHorizontal: 12 },
   attachBtn: { padding: 10, justifyContent: 'center', alignItems: 'center' },
   inputFieldContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#f2f4f7', borderRadius: 24, marginHorizontal: 8, paddingHorizontal: 12, minHeight: 44, paddingVertical: 2 },
@@ -583,18 +637,14 @@ const styles = StyleSheet.create({
   mediaBtn: { padding: 8 },
   sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: theme.colors.primary, justifyContent: 'center', alignItems: 'center', marginLeft: 4 },
   micBtn: { backgroundColor: theme.colors.primary },
-  
   recordingContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, height: 44 },
   redDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#ff3b30' },
   recordingText: { fontSize: 16, color: '#ff3b30', fontWeight: '600' },
   recordingHint: { fontSize: 14, color: '#999' },
-
   emptyState: { alignItems: 'center', marginTop: 100 },
   emptyText: { fontSize: 18, fontWeight: '700', color: '#888', marginTop: 10 },
   dateHeaderContainer: { alignItems: 'center', marginVertical: 12 },
   dateHeaderText: { fontSize: 11, fontWeight: '600', color: '#666', backgroundColor: '#e5e7eb', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, overflow: 'hidden' },
-
-  // Full Screen
   fullScreenContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
   fullScreenImage: { width: width, height: height * 0.8 },
   fullScreenClose: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 10 },
