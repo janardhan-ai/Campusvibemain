@@ -26,13 +26,16 @@ import { Message } from '../data/messages';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'ChatDetail'>;
 
+// --- EXTENDED MESSAGE TYPE ---
 interface EnhancedMessage extends Message {
   status?: 'sent' | 'delivered' | 'read';
-  type?: 'text' | 'image' | 'voice';
-  replyTo?: EnhancedMessage;
+  type?: 'text' | 'image' | 'voice'; // Supports different types
+  mediaUrl?: string; // For images
   duration?: string; // For voice notes
+  replyTo?: EnhancedMessage;
 }
 
+// --- DATE HELPER ---
 const getRelativeDate = (dateString: string) => {
   const date = new Date(dateString);
   const now = new Date();
@@ -49,6 +52,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   const { currentUser, messages } = useApp();
   const allChats = messages || []; 
   
+  // --- RECIPIENT RESOLVER ---
   let recipient = params.recipient;
   if (!recipient && params.userId) recipient = { id: params.userId, name: params.userName, avatar: params.userAvatar, username: 'User' };
   if (!recipient && params.chatId) {
@@ -66,68 +70,101 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   const [loading, setLoading] = useState(true);
   const [isTyping, setIsTyping] = useState(false); 
   const [replyingTo, setReplyingTo] = useState<EnhancedMessage | null>(null); 
-  const [showAttachments, setShowAttachments] = useState(false); // For Modal
-  const [isRecording, setIsRecording] = useState(false); // For Mic UI
-  const recordingAnim = useRef(new Animated.Value(0)).current; // For pulsing red dot
+  const [showAttachments, setShowAttachments] = useState(false); 
+  
+  // Voice Recording State
+  const [isRecording, setIsRecording] = useState(false); 
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const recordingAnim = useRef(new Animated.Value(0)).current; 
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const flatListRef = useRef<FlatList>(null);
 
-  // --- 1. TAB BAR FIX ---
-  // Ensure tab bar hides on mount and shows on unmount
+  // --- TAB BAR CONTROL ---
   useEffect(() => {
     const parent = navigation.getParent();
-    if (parent) {
-      parent.setOptions({ tabBarStyle: { display: 'none' } });
-    }
-    return () => {
-      if (parent) {
-        parent.setOptions({ 
-          tabBarStyle: { height: 56, paddingBottom: 6, paddingTop: 6, display: 'flex' } 
-        });
-      }
-    };
-  }, []); // Dependency array empty to run only once
+    if (parent) parent.setOptions({ tabBarStyle: { display: 'none' } });
+    return () => { if (parent) parent.setOptions({ tabBarStyle: { height: 56, paddingBottom: 6, paddingTop: 6, display: 'flex' } }); };
+  }, []);
 
+  // --- LOAD MESSAGES ---
   useEffect(() => {
     let targetMessages: EnhancedMessage[] = [];
     if (chatId) {
        const chat = allChats.find(c => c.id === chatId);
-       if (chat) targetMessages = chat.messages.map(m => ({...m, status: 'read'}));
+       if (chat) targetMessages = chat.messages.map(m => ({...m, status: 'read', type: 'text'}));
     } else {
        const existingChat = allChats.find(c => c.participants.some(p => p.id === recipient.id));
-       if (existingChat) targetMessages = existingChat.messages.map(m => ({...m, status: 'read'}));
+       if (existingChat) targetMessages = existingChat.messages.map(m => ({...m, status: 'read', type: 'text'}));
     }
     setCurrentMessages(targetMessages);
     setLoading(false);
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
   }, [chatId, recipient.id]);
 
-  // --- ATTACHMENT HANDLERS ---
-  const handleAttachmentPress = () => {
-    setShowAttachments(true);
+  // --- GENERIC SEND FUNCTION ---
+  const sendGenericMessage = (type: 'text' | 'image' | 'voice', content: string, extraData: any = {}) => {
+    const newMessage: EnhancedMessage = {
+      id: Date.now().toString(),
+      conversation_id: chatId || 'temp_id',
+      sender_id: currentUser?.id || 'current-user',
+      sender_name: currentUser?.name || 'You',
+      sender_avatar: currentUser?.avatar || 'https://i.pravatar.cc/150?img=11',
+      content: content,
+      is_read: false,
+      created_at: new Date().toISOString(),
+      status: 'sent', 
+      type: type,
+      replyTo: replyingTo || undefined,
+      ...extraData
+    };
+
+    setCurrentMessages(prev => [...prev, newMessage]);
+    setMessageText('');
+    setReplyingTo(null);
+    
+    // Simulate Status Updates
+    setTimeout(() => { setCurrentMessages(prev => prev.map(m => m.id === newMessage.id ? {...m, status: 'delivered'} : m)); }, 1000);
+    setTimeout(() => { setCurrentMessages(prev => prev.map(m => m.id === newMessage.id ? {...m, status: 'read'} : m)); }, 2500);
+
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
+  const handleSendMessage = () => {
+    if (!messageText.trim()) return;
+    sendGenericMessage('text', messageText);
+    simulateIncomingMessage();
+  };
+
+  // --- MULTIMEDIA HANDLERS ---
   const handleGalleryOption = () => {
     setShowAttachments(false);
-    // In a real app: launchImageLibraryAsync()
+    // Simulate picking an image
     setTimeout(() => {
-        Alert.alert("Gallery", "Opening Photos & Videos...");
-    }, 300);
+        sendGenericMessage('image', 'Photo', { mediaUrl: 'https://images.unsplash.com/photo-1517849845537-4d257902454a?q=80&w=600&auto=format&fit=crop' });
+    }, 500);
   };
 
   const handleCameraOption = () => {
     setShowAttachments(false);
-    // In a real app: launchCameraAsync()
+    // Simulate taking a photo
     setTimeout(() => {
-        Alert.alert("Camera", "Opening Camera...");
-    }, 300);
+        sendGenericMessage('image', 'Photo', { mediaUrl: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?q=80&w=600&auto=format&fit=crop' });
+    }, 500);
   };
 
   // --- MIC HANDLERS ---
   const startRecording = () => {
     Vibration.vibrate(50);
     setIsRecording(true);
-    // Start pulse animation
+    setRecordingDuration(0);
+    
+    // Start Timer
+    timerRef.current = setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+    }, 1000);
+
+    // Start Pulse
     Animated.loop(
       Animated.sequence([
         Animated.timing(recordingAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
@@ -137,45 +174,25 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   };
 
   const stopRecording = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
     setIsRecording(false);
-    // In real app: save audio file and send
-    Alert.alert("Audio Sent", "Voice note sent!");
-  };
-
-  const handleSendMessage = () => {
-    if (!messageText.trim()) return;
-
-    const myAvatar = currentUser?.avatar || 'https://i.pravatar.cc/150?img=11';
-
-    const newMessage: EnhancedMessage = {
-      id: Date.now().toString(),
-      conversation_id: chatId || 'temp_id',
-      sender_id: currentUser?.id || 'current-user',
-      sender_name: currentUser?.name || 'You',
-      sender_avatar: myAvatar,
-      content: messageText,
-      is_read: false,
-      created_at: new Date().toISOString(),
-      status: 'sent', 
-      replyTo: replyingTo || undefined
-    };
-
-    setCurrentMessages(prev => [...prev, newMessage]);
-    setMessageText('');
-    setReplyingTo(null);
     
-    setTimeout(() => {
-        setCurrentMessages(prev => prev.map(m => m.id === newMessage.id ? {...m, status: 'delivered'} : m));
-    }, 1000);
-
-    setTimeout(() => {
-        setCurrentMessages(prev => prev.map(m => m.id === newMessage.id ? {...m, status: 'read'} : m));
-    }, 2500);
-
-    simulateIncomingMessage();
-    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+    // Only send if duration > 1s
+    if (recordingDuration >= 1) {
+       const minutes = Math.floor(recordingDuration / 60);
+       const seconds = recordingDuration % 60;
+       const durationStr = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+       sendGenericMessage('voice', 'Voice Message', { duration: durationStr });
+    }
   };
 
+  const formatDuration = (seconds: number) => {
+      const min = Math.floor(seconds / 60);
+      const sec = seconds % 60;
+      return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+  };
+
+  // --- HELPERS ---
   const simulateIncomingMessage = () => {
     setTimeout(() => setIsTyping(true), 1500);
     setTimeout(() => {
@@ -186,9 +203,11 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             sender_id: recipient.id,
             sender_name: recipient.name,
             sender_avatar: recipient.avatar,
-            content: "That sounds awesome! Let's do it. 🔥",
+            content: "That looks amazing! 📸",
             is_read: true,
             created_at: new Date().toISOString(),
+            type: 'text',
+            status: 'read'
         };
         setCurrentMessages(prev => [...prev, replyMsg]);
         setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
@@ -200,6 +219,9 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     Alert.alert("Message Options", undefined, [
         { text: "Reply", onPress: () => setReplyingTo(message) },
         { text: "Copy", onPress: () => console.log("Copied") },
+        { text: "Delete", style: "destructive", onPress: () => {
+            setCurrentMessages(prev => prev.filter(m => m.id !== message.id));
+        }},
         { text: "Cancel", style: "cancel" }
     ]);
   };
@@ -209,15 +231,41 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
       navigation.navigate('Profile', { user: recipient });
   };
 
-  const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-  };
+  // --- RENDERERS ---
+  const renderMessageContent = (item: EnhancedMessage, isMyMessage: boolean) => {
+      // 1. IMAGE MESSAGE
+      if (item.type === 'image' && item.mediaUrl) {
+          return (
+              <View>
+                  <Image source={{ uri: item.mediaUrl }} style={styles.mediaImage} />
+              </View>
+          );
+      }
+      
+      // 2. VOICE MESSAGE
+      if (item.type === 'voice') {
+          return (
+              <View style={styles.voiceContainer}>
+                  <Ionicons name="play-circle" size={32} color={isMyMessage ? '#fff' : theme.colors.primary} />
+                  <View style={styles.voiceLines}>
+                      <View style={[styles.voiceLine, { height: 10, backgroundColor: isMyMessage ? '#fff' : '#ccc' }]} />
+                      <View style={[styles.voiceLine, { height: 16, backgroundColor: isMyMessage ? '#fff' : '#ccc' }]} />
+                      <View style={[styles.voiceLine, { height: 12, backgroundColor: isMyMessage ? '#fff' : '#ccc' }]} />
+                      <View style={[styles.voiceLine, { height: 20, backgroundColor: isMyMessage ? '#fff' : '#ccc' }]} />
+                      <View style={[styles.voiceLine, { height: 14, backgroundColor: isMyMessage ? '#fff' : '#ccc' }]} />
+                  </View>
+                  <Text style={[styles.voiceDuration, { color: isMyMessage ? '#fff' : '#666' }]}>{item.duration}</Text>
+              </View>
+          );
+      }
 
-  const renderDateHeader = (date: string) => (
-    <View style={styles.dateHeaderContainer}>
-        <Text style={styles.dateHeaderText}>{date}</Text>
-    </View>
-  );
+      // 3. TEXT MESSAGE
+      return (
+          <Text style={[styles.messageText, isMyMessage ? styles.textLight : styles.textDark]}>
+              {item.content}
+          </Text>
+      );
+  };
 
   const renderMessageItem = ({ item, index }: { item: EnhancedMessage; index: number }) => {
     const isMyMessage = item.sender_id === currentUser?.id;
@@ -229,7 +277,11 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
     return (
       <View>
-        {showDateHeader && renderDateHeader(currentDate)}
+        {showDateHeader && (
+            <View style={styles.dateHeaderContainer}>
+                <Text style={styles.dateHeaderText}>{currentDate}</Text>
+            </View>
+        )}
         
         <TouchableOpacity 
             activeOpacity={0.8} 
@@ -245,23 +297,24 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
           <View style={[
               styles.bubble, 
               isMyMessage ? styles.bubbleRight : styles.bubbleLeft,
-              !showAvatar && (isMyMessage ? styles.bubbleRightGroup : styles.bubbleLeftGroup)
+              !showAvatar && (isMyMessage ? styles.bubbleRightGroup : styles.bubbleLeftGroup),
+              item.type === 'image' && { padding: 4 } // Less padding for images
           ]}>
              {item.replyTo && (
                  <View style={styles.replyContext}>
                      <View style={styles.replyBar} />
                      <Text style={styles.replyName}>{item.replyTo.sender_id === currentUser?.id ? 'You' : item.replyTo.sender_name}</Text>
-                     <Text style={styles.replyText} numberOfLines={1}>{item.replyTo.content}</Text>
+                     <Text style={styles.replyText} numberOfLines={1}>
+                         {item.replyTo.type === 'image' ? '📷 Photo' : item.replyTo.type === 'voice' ? '🎤 Voice Message' : item.replyTo.content}
+                     </Text>
                  </View>
              )}
 
-             <Text style={[styles.messageText, isMyMessage ? styles.textLight : styles.textDark]}>
-                 {item.content}
-             </Text>
+             {renderMessageContent(item, isMyMessage)}
              
              <View style={styles.metaContainer}>
                  <Text style={[styles.timeText, isMyMessage ? styles.timeLight : styles.timeDark]}>
-                     {formatTime(item.created_at)}
+                     {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                  </Text>
                  {isMyMessage && (
                      <Ionicons 
@@ -305,12 +358,8 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             </View>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.headerOption}>
-            <Ionicons name="videocam-outline" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.headerOption}>
-            <Ionicons name="call-outline" size={22} color={theme.colors.text} />
-        </TouchableOpacity>
+        <TouchableOpacity style={styles.headerOption}><Ionicons name="videocam-outline" size={24} color={theme.colors.text} /></TouchableOpacity>
+        <TouchableOpacity style={styles.headerOption}><Ionicons name="call-outline" size={22} color={theme.colors.text} /></TouchableOpacity>
       </View>
 
       <KeyboardAvoidingView
@@ -324,52 +373,34 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             keyExtractor={item => item.id}
             renderItem={renderMessageItem}
             contentContainerStyle={styles.listContent}
-            ListFooterComponent={
-                isTyping ? (
-                    <View style={{ marginLeft: 50, marginBottom: 10 }}>
-                        <Text style={{ color: '#999', fontSize: 12, fontStyle: 'italic' }}>{recipient.name} is typing...</Text>
-                    </View>
-                ) : null
-            }
-            ListEmptyComponent={
-            loading ? null : (
-                <View style={styles.emptyState}>
-                <Ionicons name="chatbubble-ellipses-outline" size={64} color="#ddd" />
-                <Text style={styles.emptyText}>No messages yet</Text>
-                <Text style={styles.emptySub}>Start the conversation with {recipient.name}!</Text>
-                </View>
-            )
-            }
+            ListFooterComponent={isTyping ? <View style={{ marginLeft: 50, marginBottom: 10 }}><Text style={{ color: '#999', fontSize: 12, fontStyle: 'italic' }}>{recipient.name} is typing...</Text></View> : null}
+            ListEmptyComponent={loading ? null : <View style={styles.emptyState}><Ionicons name="chatbubble-ellipses-outline" size={64} color="#ddd" /><Text style={styles.emptyText}>No messages yet</Text><Text style={styles.emptySub}>Start the conversation with {recipient.name}!</Text></View>}
         />
 
-        {/* --- INPUT AREA --- */}
+        {/* INPUT AREA */}
         <View style={styles.inputWrapper}>
             {replyingTo && (
                 <View style={styles.replyBanner}>
                     <View style={{flex: 1}}>
                         <Text style={styles.replyBannerTitle}>Replying to {replyingTo.sender_id === currentUser?.id ? 'Yourself' : replyingTo.sender_name}</Text>
-                        <Text style={styles.replyBannerText} numberOfLines={1}>{replyingTo.content}</Text>
+                        <Text style={styles.replyBannerText} numberOfLines={1}>{replyingTo.type === 'image' ? '📷 Photo' : replyingTo.type === 'voice' ? '🎤 Voice Message' : replyingTo.content}</Text>
                     </View>
-                    <TouchableOpacity onPress={() => setReplyingTo(null)}>
-                        <Ionicons name="close" size={20} color="#666" />
-                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setReplyingTo(null)}><Ionicons name="close" size={20} color="#666" /></TouchableOpacity>
                 </View>
             )}
 
             <View style={styles.inputBar}>
                 {isRecording ? (
-                    // --- RECORDING UI ---
                     <View style={styles.recordingContainer}>
                         <Animated.View style={{ opacity: recordingAnim, marginRight: 10 }}>
                             <View style={styles.redDot} />
                         </Animated.View>
-                        <Text style={styles.recordingText}>0:05</Text>
-                        <Text style={styles.recordingHint}>Slide to cancel</Text>
+                        <Text style={styles.recordingText}>{formatDuration(recordingDuration)}</Text>
+                        <Text style={styles.recordingHint}>Recording...</Text>
                     </View>
                 ) : (
-                    // --- NORMAL INPUT UI ---
                     <>
-                        <TouchableOpacity style={styles.attachBtn} onPress={handleAttachmentPress}>
+                        <TouchableOpacity style={styles.attachBtn} onPress={() => setShowAttachments(true)}>
                             <Ionicons name="add" size={28} color={theme.colors.primary} />
                         </TouchableOpacity>
                         
@@ -382,14 +413,15 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                                 multiline
                                 maxLength={1000}
                             />
-                            <TouchableOpacity style={styles.mediaBtn} onPress={handleCameraOption}>
-                                <Ionicons name="camera-outline" size={24} color="#999" />
-                            </TouchableOpacity>
+                            {!messageText && (
+                                <TouchableOpacity style={styles.mediaBtn} onPress={handleCameraOption}>
+                                    <Ionicons name="camera-outline" size={24} color="#999" />
+                                </TouchableOpacity>
+                            )}
                         </View>
                     </>
                 )}
 
-                {/* SEND / MIC BUTTON */}
                 <TouchableOpacity 
                     style={[styles.sendBtn, (!messageText.trim() && !isRecording) && styles.micBtn]} 
                     onPress={messageText.trim() ? handleSendMessage : undefined}
@@ -406,28 +438,25 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
         </View>
       </KeyboardAvoidingView>
 
-      {/* --- PROFESSIONAL ATTACHMENT MODAL --- */}
+      {/* ATTACHMENT MODAL */}
       <Modal visible={showAttachments} transparent animationType="slide" onRequestClose={() => setShowAttachments(false)}>
          <TouchableWithoutFeedback onPress={() => setShowAttachments(false)}>
              <View style={styles.modalOverlay}>
                  <View style={styles.bottomSheet}>
                      <View style={styles.sheetHandle} />
                      <Text style={styles.sheetTitle}>Share Content</Text>
-                     
                      <TouchableOpacity style={styles.sheetOption} onPress={handleGalleryOption}>
-                         <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}>
-                             <Ionicons name="images" size={24} color="#0288D1" />
-                         </View>
+                         <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}><Ionicons name="images" size={24} color="#0288D1" /></View>
                          <Text style={styles.sheetText}>Gallery (Photos & Videos)</Text>
                      </TouchableOpacity>
-
                      <TouchableOpacity style={styles.sheetOption} onPress={handleCameraOption}>
-                         <View style={[styles.iconCircle, { backgroundColor: '#E8F5E9' }]}>
-                             <Ionicons name="camera" size={24} color="#388E3C" />
-                         </View>
+                         <View style={[styles.iconCircle, { backgroundColor: '#E8F5E9' }]}><Ionicons name="camera" size={24} color="#388E3C" /></View>
                          <Text style={styles.sheetText}>Camera</Text>
                      </TouchableOpacity>
-
+                     <TouchableOpacity style={styles.sheetOption} onPress={() => setShowAttachments(false)}>
+                         <View style={[styles.iconCircle, { backgroundColor: '#FFF3E0' }]}><Ionicons name="document-text" size={24} color="#FB8C00" /></View>
+                         <Text style={styles.sheetText}>Document</Text>
+                     </TouchableOpacity>
                      <TouchableOpacity style={styles.sheetCancel} onPress={() => setShowAttachments(false)}>
                          <Text style={styles.sheetCancelText}>Cancel</Text>
                      </TouchableOpacity>
@@ -435,46 +464,29 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
              </View>
          </TouchableWithoutFeedback>
       </Modal>
-
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  mainContainer: { 
-      flex: 1, 
-      backgroundColor: '#f2f4f7', 
-      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 
-  },
+  mainContainer: { flex: 1, backgroundColor: '#f2f4f7', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
   container: { flex: 1 },
   center: { justifyContent: 'center', alignItems: 'center' },
   
-  // HEADER
-  header: { 
-      flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', 
-      height: 60, paddingHorizontal: 10, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05 
-  },
+  header: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', height: 60, paddingHorizontal: 10, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05 },
   backBtn: { padding: 8 },
   headerContent: { flex: 1, flexDirection: 'row', alignItems: 'center', marginLeft: 5 },
   headerAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#eee' },
-  onlineBadge: { 
-      position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, 
-      borderRadius: 5, backgroundColor: '#4ade80', borderWidth: 1.5, borderColor: '#fff' 
-  },
+  onlineBadge: { position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: 5, backgroundColor: '#4ade80', borderWidth: 1.5, borderColor: '#fff' },
   headerTextContainer: { marginLeft: 10 },
   headerName: { fontSize: 16, fontWeight: '700', color: '#111' },
   headerStatus: { fontSize: 11, color: '#4ade80', fontWeight: '500' },
   headerOption: { padding: 8 },
 
-  // LIST
   listContent: { paddingVertical: 15, paddingHorizontal: 12 },
   dateHeaderContainer: { alignItems: 'center', marginVertical: 12 },
-  dateHeaderText: { 
-      fontSize: 11, fontWeight: '600', color: '#666', backgroundColor: '#e5e7eb', 
-      paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, overflow: 'hidden' 
-  },
+  dateHeaderText: { fontSize: 11, fontWeight: '600', color: '#666', backgroundColor: '#e5e7eb', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, overflow: 'hidden' },
 
-  // MESSAGES
   messageRow: { flexDirection: 'row', marginBottom: 2, alignItems: 'flex-end' },
   rowLeft: { justifyContent: 'flex-start' },
   rowRight: { justifyContent: 'flex-end' },
@@ -482,10 +494,7 @@ const styles = StyleSheet.create({
   avatarContainerRight: { width: 28, marginLeft: 8, paddingBottom: 4 },
   avatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#ccc' },
   
-  bubble: { 
-      maxWidth: '75%', paddingHorizontal: 12, paddingVertical: 8, 
-      borderRadius: 18, elevation: 1 
-  },
+  bubble: { maxWidth: '75%', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, elevation: 1 },
   bubbleLeft: { backgroundColor: '#fff', borderBottomLeftRadius: 4 },
   bubbleLeftGroup: { borderBottomLeftRadius: 18, marginBottom: 2 },
   bubbleRight: { backgroundColor: theme.colors.primary, borderBottomRightRadius: 4 },
@@ -494,63 +503,46 @@ const styles = StyleSheet.create({
   messageText: { fontSize: 15, lineHeight: 21 },
   textLight: { color: '#fff' },
   textDark: { color: '#111' },
+  
+  mediaImage: { width: 200, height: 150, borderRadius: 12, resizeMode: 'cover' },
+  
+  voiceContainer: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 120 },
+  voiceLines: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 24 },
+  voiceLine: { width: 3, borderRadius: 1.5 },
+  voiceDuration: { fontSize: 12, fontWeight: '600' },
 
   metaContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 2 },
   timeText: { fontSize: 10 },
   timeLight: { color: 'rgba(255,255,255,0.7)' },
   timeDark: { color: '#999' },
 
-  replyContext: { 
-      backgroundColor: 'rgba(0,0,0,0.1)', padding: 6, borderRadius: 8, 
-      marginBottom: 6, borderLeftWidth: 3, borderLeftColor: 'rgba(0,0,0,0.3)' 
-  },
+  replyContext: { backgroundColor: 'rgba(0,0,0,0.1)', padding: 6, borderRadius: 8, marginBottom: 6, borderLeftWidth: 3, borderLeftColor: 'rgba(0,0,0,0.3)' },
   replyBar: { position: 'absolute' },
   replyName: { fontSize: 11, fontWeight: '700', color: 'rgba(0,0,0,0.6)', marginBottom: 2 },
   replyText: { fontSize: 12, color: 'rgba(0,0,0,0.5)' },
 
-  // INPUT
-  inputWrapper: { 
-      backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee',
-      paddingBottom: Platform.OS === 'ios' ? 20 : 5 
-  },
-  replyBanner: { 
-      flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', 
-      padding: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#ddd' 
-  },
+  inputWrapper: { backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee', paddingBottom: Platform.OS === 'ios' ? 20 : 5 },
+  replyBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', padding: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#ddd' },
   replyBannerTitle: { fontSize: 12, fontWeight: '700', color: theme.colors.primary },
   replyBannerText: { fontSize: 12, color: '#666' },
 
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', padding: 8, paddingHorizontal: 12 },
   attachBtn: { padding: 10, justifyContent: 'center', alignItems: 'center' },
-  inputFieldContainer: { 
-      flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#f2f4f7', 
-      borderRadius: 24, marginHorizontal: 8, paddingHorizontal: 12, minHeight: 44, paddingVertical: 2
-  },
+  inputFieldContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#f2f4f7', borderRadius: 24, marginHorizontal: 8, paddingHorizontal: 12, minHeight: 44, paddingVertical: 2 },
   input: { flex: 1, maxHeight: 100, fontSize: 16, paddingVertical: 8, color: '#000' },
   mediaBtn: { padding: 8 },
-  sendBtn: { 
-      width: 44, height: 44, borderRadius: 22, backgroundColor: theme.colors.primary, 
-      justifyContent: 'center', alignItems: 'center', marginLeft: 4 
-  },
-  micBtn: { 
-      backgroundColor: theme.colors.primary, 
-  },
+  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: theme.colors.primary, justifyContent: 'center', alignItems: 'center', marginLeft: 4 },
+  micBtn: { backgroundColor: theme.colors.primary },
   
-  // RECORDING UI
-  recordingContainer: {
-      flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-      paddingHorizontal: 20, height: 44
-  },
+  recordingContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, height: 44 },
   redDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#ff3b30' },
   recordingText: { fontSize: 16, color: '#ff3b30', fontWeight: '600' },
   recordingHint: { fontSize: 14, color: '#999' },
 
-  // EMPTY
   emptyState: { alignItems: 'center', marginTop: 100 },
   emptyText: { fontSize: 18, fontWeight: '700', color: '#888', marginTop: 10 },
   emptySub: { fontSize: 14, color: '#aaa' },
 
-  // BOTTOM SHEET MODAL
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   bottomSheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 40 },
   sheetHandle: { width: 40, height: 4, backgroundColor: '#ddd', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
