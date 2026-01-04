@@ -49,6 +49,32 @@ const getRelativeDate = (dateString: string) => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
+// --- MOCK UPLOAD FUNCTION ---
+// In a real app, this sends the file to Supabase/AWS and returns a public URL.
+const uploadToStorage = async (localUri: string, type: 'image' | 'video' | 'voice') => {
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // --- REAL BACKEND CODE WOULD LOOK LIKE THIS: ---
+    /*
+    const filename = localUri.split('/').pop();
+    const formData = new FormData();
+    formData.append('file', {
+        uri: localUri,
+        name: filename,
+        type: type === 'video' ? 'video/mp4' : type === 'image' ? 'image/jpeg' : 'audio/m4a'
+    } as any);
+
+    const { data, error } = await supabase.storage.from('chat-media').upload(filename, formData);
+    if (error) throw error;
+    const { publicUrl } = supabase.storage.from('chat-media').getPublicUrl(filename);
+    return publicUrl;
+    */
+
+    // For now, return the local URI so the demo works without a server
+    return localUri; 
+};
+
 export const ChatDetailScreen = ({ route, navigation }: Props) => {
   const params = route.params as any; 
   const { currentUser, messages } = useApp();
@@ -73,21 +99,21 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   const [replyingTo, setReplyingTo] = useState<EnhancedMessage | null>(null); 
   const [fullScreenMedia, setFullScreenMedia] = useState<{ url: string, type: 'image' | 'video' } | null>(null);
 
-  // --- RECORDING STATE (REAL) ---
-  const [isRecording, setIsRecording] = useState(false); // <--- FIXED: Added this missing line
+  // Recording State
+  const [isRecording, setIsRecording] = useState(false); 
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingAnim = useRef(new Animated.Value(0)).current; 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // --- PLAYBACK STATE (REAL) ---
+  // Playback State
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const playbackAnim = useRef(new Animated.Value(0)).current;
 
   const flatListRef = useRef<FlatList>(null);
 
-  // --- SETUP AUDIO MODE ---
+  // --- SETUP ---
   useEffect(() => {
     async function setupAudio() {
       try {
@@ -126,18 +152,79 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
   }, [chatId, recipient.id]);
 
+  // --- BACKEND-READY SEND LOGIC ---
+  const sendGenericMessage = async (type: 'text' | 'image' | 'video' | 'voice', content: string, extraData: any = {}) => {
+    const tempId = Date.now().toString();
+    const myAvatar = currentUser?.avatar || 'https://i.pravatar.cc/150?img=11';
+
+    // 1. OPTIMISTIC UPDATE: Show message immediately with LOCAL data
+    const localMessage: EnhancedMessage = {
+      id: tempId,
+      conversation_id: chatId || 'temp_id',
+      sender_id: currentUser?.id || 'current-user',
+      sender_name: currentUser?.name || 'You',
+      sender_avatar: myAvatar,
+      content: content,
+      is_read: false,
+      created_at: new Date().toISOString(),
+      status: 'sent', // Shows one tick immediately
+      type: type,
+      replyTo: replyingTo || undefined,
+      ...extraData // Contains local uri (file://...)
+    };
+
+    setCurrentMessages(prev => [...prev, localMessage]);
+    setMessageText('');
+    setReplyingTo(null);
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+
+    try {
+        let finalMediaUrl = extraData.mediaUrl;
+
+        // 2. UPLOAD MEDIA (If exists)
+        if (type !== 'text' && extraData.mediaUrl) {
+            // Upload local file to cloud and get public URL
+            finalMediaUrl = await uploadToStorage(extraData.mediaUrl, type);
+        }
+
+        // 3. SIMULATE DATABASE INSERT (Mocking backend delay)
+        // await supabase.from('messages').insert({ ...localMessage, mediaUrl: finalMediaUrl });
+        await new Promise(resolve => setTimeout(resolve, 500)); // DB Latency
+
+        // 4. UPDATE STATUS TO 'DELIVERED'
+        // Replace the local URI with the public URL (if uploaded) and update tick status
+        setCurrentMessages(prev => prev.map(m => 
+            m.id === tempId ? { ...m, status: 'delivered', mediaUrl: finalMediaUrl } : m
+        ));
+
+        // 5. SIMULATE 'READ' STATUS (After a delay)
+        setTimeout(() => {
+            setCurrentMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'read' } : m));
+        }, 3000);
+
+    } catch (error) {
+        console.error("Send failed", error);
+        Alert.alert("Failed to send message");
+        // Mark message as failed in UI (optional logic)
+    }
+  };
+
+  const handleSendMessage = () => {
+    if (!messageText.trim()) return;
+    sendGenericMessage('text', messageText);
+    simulateIncomingMessage();
+  };
+
   // --- MEDIA HANDLERS ---
   const handleMediaPress = (url: string, type: 'image' | 'video') => {
       setFullScreenMedia({ url, type });
   };
 
-  // --- REAL AUDIO PLAYBACK ---
   const handlePlayAudio = async (messageId: string, uri: string) => {
       if (playingAudioId === messageId) {
           await stopAudioPlayback();
           return;
       }
-
       await stopAudioPlayback();
 
       try {
@@ -145,7 +232,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
               { uri: uri },
               { shouldPlay: true } 
           );
-          
           setSound(newSound);
           setPlayingAudioId(messageId);
 
@@ -159,10 +245,8 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                   }
               }
           });
-
       } catch (error) {
           console.log("Error playing audio:", error);
-          Alert.alert("Error", "Could not play audio file.");
       }
   };
 
@@ -175,37 +259,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
       playbackAnim.setValue(0);
   };
 
-  // --- SEND LOGIC ---
-  const sendGenericMessage = (type: 'text' | 'image' | 'video' | 'voice', content: string, extraData: any = {}) => {
-    const newMessage: EnhancedMessage = {
-      id: Date.now().toString(),
-      conversation_id: chatId || 'temp_id',
-      sender_id: currentUser?.id || 'current-user',
-      sender_name: currentUser?.name || 'You',
-      sender_avatar: currentUser?.avatar || 'https://i.pravatar.cc/150?img=11',
-      content: content,
-      is_read: false,
-      created_at: new Date().toISOString(),
-      status: 'sent', 
-      type: type,
-      replyTo: replyingTo || undefined,
-      ...extraData
-    };
-
-    setCurrentMessages(prev => [...prev, newMessage]);
-    setMessageText('');
-    setReplyingTo(null);
-    
-    setTimeout(() => { setCurrentMessages(prev => prev.map(m => m.id === newMessage.id ? {...m, status: 'delivered'} : m)); }, 1000);
-    setTimeout(() => { setCurrentMessages(prev => prev.map(m => m.id === newMessage.id ? {...m, status: 'read'} : m)); }, 2500);
-    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-  };
-
-  const handleSendMessage = () => {
-    if (!messageText.trim()) return;
-    sendGenericMessage('text', messageText);
-  };
-
+  // --- REAL DEVICE MEDIA PICKER ---
   const openGallery = async () => {
     try {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -235,17 +289,13 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     } catch (error) { console.log(error); }
   };
 
-  // --- REAL RECORDING LOGIC ---
+  // --- RECORDING ---
   const startRecording = async () => {
     try {
         const perm = await Audio.requestPermissionsAsync();
         if (perm.status !== "granted") return;
 
-        await Audio.setAudioModeAsync({
-            allowsRecordingIOS: true,
-            playsInSilentModeIOS: true,
-        });
-
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
         Vibration.vibrate(50);
         setIsRecording(true);
         setRecordingDuration(0);
@@ -259,52 +309,69 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             ])
         ).start();
 
-        const { recording: newRecording } = await Audio.Recording.createAsync(
-            Audio.RecordingOptionsPresets.HIGH_QUALITY
-        );
+        const { recording: newRecording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
         setRecording(newRecording);
-
-    } catch (err) {
-        console.error('Failed to start recording', err);
-    }
+    } catch (err) { console.error('Failed to start recording', err); }
   };
 
   const stopRecording = async () => {
     setIsRecording(false);
     if (timerRef.current) clearInterval(timerRef.current);
     recordingAnim.stopAnimation();
-    
     if (!recording) return;
     
     try {
         await recording.stopAndUnloadAsync();
         const uri = recording.getURI(); 
-        
-        await Audio.setAudioModeAsync({
-            allowsRecordingIOS: false,
-            playsInSilentModeIOS: true,
-        });
-
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
         setRecording(null);
 
         if (recordingDuration >= 1 && uri) {
             const min = Math.floor(recordingDuration / 60);
             const sec = recordingDuration % 60;
             const durationStr = `${min}:${sec < 10 ? '0' : ''}${sec}`;
-            sendGenericMessage('voice', 'Voice Message', { 
-                mediaUrl: uri, 
-                duration: durationStr 
-            });
+            sendGenericMessage('voice', 'Voice Message', { mediaUrl: uri, duration: durationStr });
         }
-    } catch (error) {
-        console.log("Error stopping recording", error);
-    }
+    } catch (error) { console.log("Error stopping recording", error); }
   };
 
   const formatDuration = (seconds: number) => {
       const min = Math.floor(seconds / 60);
       const sec = seconds % 60;
       return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+  };
+
+  const simulateIncomingMessage = () => {
+    setTimeout(() => setIsTyping(true), 2000);
+    setTimeout(() => {
+        setIsTyping(false);
+        const replyMsg: EnhancedMessage = {
+            id: Date.now().toString(),
+            conversation_id: chatId || 'temp_id',
+            sender_id: recipient.id,
+            sender_name: recipient.name,
+            sender_avatar: recipient.avatar,
+            content: "That's awesome! 🔥",
+            is_read: true,
+            created_at: new Date().toISOString(),
+            type: 'text',
+            status: 'read'
+        };
+        setCurrentMessages(prev => [...prev, replyMsg]);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+    }, 4000);
+  };
+
+  const handleLongPress = (message: EnhancedMessage) => {
+    Vibration.vibrate(50);
+    Alert.alert("Message Options", undefined, [
+        { text: "Reply", onPress: () => setReplyingTo(message) },
+        { text: "Copy", onPress: () => console.log("Copied") },
+        { text: "Delete", style: "destructive", onPress: () => {
+            setCurrentMessages(prev => prev.filter(m => m.id !== message.id));
+        }},
+        { text: "Cancel", style: "cancel" }
+    ]);
   };
 
   // --- RENDERERS ---
@@ -348,30 +415,20 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                         color={isMyMessage ? '#fff' : theme.colors.primary} 
                       />
                   </TouchableOpacity>
-                  
                   <View style={styles.voiceWaveform}>
                       <View style={[styles.voiceTrack, { backgroundColor: isMyMessage ? 'rgba(255,255,255,0.3)' : '#ddd' }]}>
                           <Animated.View style={[
                               styles.voiceProgress, 
-                              { 
-                                  width: progressWidth as any,
-                                  backgroundColor: isMyMessage ? '#fff' : theme.colors.primary 
-                              } 
+                              { width: progressWidth as any, backgroundColor: isMyMessage ? '#fff' : theme.colors.primary } 
                           ]} />
                       </View>
-                      <Text style={[styles.voiceDuration, { color: isMyMessage ? '#fff' : '#666' }]}>
-                          {item.duration || '0:00'}
-                      </Text>
+                      <Text style={[styles.voiceDuration, { color: isMyMessage ? '#fff' : '#666' }]}>{item.duration || '0:00'}</Text>
                   </View>
               </View>
           );
       }
 
-      return (
-          <Text style={[styles.messageText, isMyMessage ? styles.textLight : styles.textDark]}>
-              {item.content}
-          </Text>
-      );
+      return <Text style={[styles.messageText, isMyMessage ? styles.textLight : styles.textDark]}>{item.content}</Text>;
   };
 
   const renderMessageItem = ({ item, index }: { item: EnhancedMessage; index: number }) => {
@@ -383,21 +440,16 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
     return (
       <View>
-        {showDateHeader && (
-            <View style={styles.dateHeaderContainer}>
-                <Text style={styles.dateHeaderText}>{currentDate}</Text>
-            </View>
-        )}
-        
+        {showDateHeader && <View style={styles.dateHeaderContainer}><Text style={styles.dateHeaderText}>{currentDate}</Text></View>}
         <View style={[styles.messageRow, isMyMessage ? styles.rowRight : styles.rowLeft]}>
           {!isMyMessage && (
              <View style={styles.avatarContainer}>
                  {showAvatar ? <Image source={{ uri: item.sender_avatar }} style={styles.avatar} /> : <View style={{width: 28}} />}
              </View>
           )}
-
           <TouchableOpacity 
               activeOpacity={0.8}
+              onLongPress={() => handleLongPress(item)}
               style={[
                   styles.bubble, 
                   isMyMessage ? styles.bubbleRight : styles.bubbleLeft,
@@ -414,16 +466,14 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                      </Text>
                  </View>
              )}
-
              {renderMessageContent(item, isMyMessage)}
-             
              <View style={styles.metaContainer}>
                  <Text style={[styles.timeText, isMyMessage ? styles.timeLight : styles.timeDark]}>
                      {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                  </Text>
                  {isMyMessage && (
                      <Ionicons 
-                        name={item.status === 'read' ? "checkmark-done" : "checkmark"} 
+                        name={item.status === 'read' ? "checkmark-done" : item.status === 'delivered' ? "checkmark-done" : "checkmark"} 
                         size={14} 
                         color={item.status === 'read' ? '#bbf7d0' : 'rgba(255,255,255,0.7)'} 
                         style={{ marginLeft: 4 }}
@@ -431,7 +481,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                  )}
              </View>
           </TouchableOpacity>
-
           {isMyMessage && (
              <View style={styles.avatarContainerRight}>
                  {showAvatar ? <Image source={{ uri: item.sender_avatar }} style={styles.avatar} /> : <View style={{width: 28}} />}
@@ -446,6 +495,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     <View style={styles.mainContainer}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
       
+      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
@@ -471,6 +521,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             keyExtractor={item => item.id}
             renderItem={renderMessageItem}
             contentContainerStyle={styles.listContent}
+            ListFooterComponent={isTyping ? <View style={{ marginLeft: 50, marginBottom: 10 }}><Text style={{ color: '#999', fontSize: 12, fontStyle: 'italic' }}>{recipient.name} is typing...</Text></View> : null}
             ListEmptyComponent={loading ? null : <View style={styles.emptyState}><Ionicons name="chatbubble-ellipses-outline" size={64} color="#ddd" /><Text style={styles.emptyText}>No messages yet</Text></View>}
         />
 
@@ -493,14 +544,13 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                             <View style={styles.redDot} />
                         </Animated.View>
                         <Text style={styles.recordingText}>{formatDuration(recordingDuration)}</Text>
-                        <Text style={styles.recordingHint}>Recording...</Text>
+                        <Text style={styles.recordingHint}>Slide to cancel</Text>
                     </View>
                 ) : (
                     <>
                         <TouchableOpacity style={styles.attachBtn} onPress={openGallery}>
                             <Ionicons name="add" size={28} color={theme.colors.primary} />
                         </TouchableOpacity>
-                        
                         <View style={styles.inputFieldContainer}>
                             <TextInput
                                 style={styles.input}
