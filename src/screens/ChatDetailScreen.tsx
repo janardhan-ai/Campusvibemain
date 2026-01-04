@@ -18,7 +18,7 @@ import {
   Dimensions,
   TouchableWithoutFeedback,
   GestureResponderEvent,
-  Linking
+  Linking // Required to open documents
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { HomeStackParamList } from '../types';
@@ -27,7 +27,7 @@ import { useApp } from '../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 import { Message } from '../data/messages';
 import * as ImagePicker from 'expo-image-picker'; 
-import * as DocumentPicker from 'expo-document-picker'; // npx expo install expo-document-picker
+import * as DocumentPicker from 'expo-document-picker'; 
 import { Video, ResizeMode, Audio } from 'expo-av'; 
 import * as Clipboard from 'expo-clipboard'; 
 
@@ -48,7 +48,7 @@ interface EnhancedMessage extends Message {
   replyTo?: EnhancedMessage;
   is_edited?: boolean; 
   reactions?: Reaction[];
-  fileName?: string; // New for documents
+  fileName?: string; 
 }
 
 const getRelativeDate = (dateString: string) => {
@@ -89,13 +89,9 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
   // Modals & Menus
   const [fullScreenMedia, setFullScreenMedia] = useState<{ url: string, type: 'image' | 'video' } | null>(null);
-  
-  // MESSAGE MENU
   const [menuVisible, setMenuVisible] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<EnhancedMessage | null>(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0, alignRight: false });
-
-  // ATTACHMENT MENU (The Plus Button Logic)
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
 
   // Recording & Playback
@@ -208,7 +204,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     setCurrentMessages(prev => [...prev, newMessage]);
     setMessageText('');
     setReplyingTo(null);
-    setAttachmentMenuVisible(false); // Close menu if open
+    setAttachmentMenuVisible(false); 
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
 
     try {
@@ -220,7 +216,44 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     } catch (error) { console.error("Send failed"); }
   };
 
-  // --- ATTACHMENT HANDLERS (UPDATED) ---
+  // --- DOCUMENT HANDLER (UPDATED) ---
+  const openDocument = async () => {
+      try {
+          const result = await DocumentPicker.getDocumentAsync({
+              type: [
+                  'application/pdf',
+                  'application/msword',
+                  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // docx
+                  'application/vnd.ms-excel',
+                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',    // xlsx
+                  'application/vnd.ms-powerpoint',
+                  'application/vnd.openxmlformats-officedocument.presentationml.presentation', // pptx
+                  'text/plain',
+                  'image/*',  // JPG, PNG
+                  'audio/*',  // MP3, WAV
+                  'video/mp4' // MP4
+              ],
+              copyToCacheDirectory: true
+          });
+
+          if (!result.canceled) {
+              const file = result.assets[0];
+              // Allowed Extensions List
+              const allowedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'jpg', 'jpeg', 'png', 'mp3', 'wav', 'm4a', 'aac', 'mp4'];
+              const extension = file.name.split('.').pop()?.toLowerCase();
+
+              if (extension && allowedExtensions.includes(extension)) {
+                  sendGenericMessage('document', file.name, { mediaUrl: file.uri, fileName: file.name });
+              } else {
+                  Alert.alert("Unsupported File", "This file type is not supported.");
+              }
+          }
+      } catch (e) {
+          Alert.alert("Error", "Could not pick document");
+      }
+  };
+
+  // --- MEDIA HANDLERS ---
   const openGallery = async () => { 
     try {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -242,33 +275,72 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
         if (!result.canceled) sendGenericMessage('image', 'Photo', { mediaUrl: result.assets[0].uri });
     } catch (e) {}
   };
-
-  const openDocument = async () => {
-      try {
-          const result = await DocumentPicker.getDocumentAsync({ type: '*/*' });
-          if (!result.canceled) {
-              const file = result.assets[0];
-              sendGenericMessage('document', file.name, { mediaUrl: file.uri, fileName: file.name });
-          }
-      } catch (e) {}
-  };
   
-  // --- RECORDING & AUDIO (Same logic) ---
-  const startRecording = async () => { /* ... Previous Logic ... */ };
-  const stopRecording = async () => { /* ... Previous Logic ... */ };
-  const handlePlayAudio = async (id: string, uri: string) => { /* ... Previous Logic ... */ };
-  const simulateIncomingMessage = () => { /* ... Previous Logic ... */ };
+  // --- RECORDING & AUDIO ---
+  const startRecording = async () => {
+      try {
+          const perm = await Audio.requestPermissionsAsync();
+          if (perm.status !== "granted") return;
+          await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+          Vibration.vibrate(50);
+          setIsRecording(true);
+          setRecordingDuration(0);
+          timerRef.current = setInterval(() => { setRecordingDuration(prev => prev + 1); }, 1000);
+          Animated.loop(Animated.sequence([
+              Animated.timing(recordingAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+              Animated.timing(recordingAnim, { toValue: 0, duration: 500, useNativeDriver: true })
+          ])).start();
+          const { recording: newRecording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+          setRecording(newRecording);
+      } catch (err) { console.error('Failed to start recording', err); }
+  };
+
+  const stopRecording = async () => {
+      setIsRecording(false);
+      if (timerRef.current) clearInterval(timerRef.current);
+      recordingAnim.stopAnimation();
+      if (!recording) return;
+      try {
+          await recording.stopAndUnloadAsync();
+          const uri = recording.getURI(); 
+          await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+          setRecording(null);
+          if (recordingDuration >= 1 && uri) {
+              const min = Math.floor(recordingDuration / 60);
+              const sec = recordingDuration % 60;
+              const durationStr = `${min}:${sec < 10 ? '0' : ''}${sec}`;
+              sendGenericMessage('voice', 'Voice Message', { mediaUrl: uri, duration: durationStr });
+          }
+      } catch (error) { console.log("Error stopping recording", error); }
+  };
+
+  const handlePlayAudio = async (id: string, uri: string) => { /* ... (Same as before) ... */ };
+  const simulateIncomingMessage = () => { /* ... (Same as before) ... */ };
 
   // --- RENDERERS ---
   const renderMessageContent = (item: EnhancedMessage, isMyMessage: boolean) => {
       if (item.type === 'deleted') return <Text style={{fontStyle:'italic', color:'#888'}}>{item.content}</Text>;
       
+      // DOCUMENT RENDERER (UPDATED)
       if (item.type === 'document') {
+          let iconName: any = "document-text";
+          let iconColor = theme.colors.primary;
+          const ext = item.fileName?.split('.').pop()?.toLowerCase();
+
+          if (ext === 'pdf') { iconName = "document-text"; iconColor = "#E53935"; } // Red for PDF
+          else if (['doc', 'docx'].includes(ext || '')) { iconName = "document"; iconColor = "#1E88E5"; } // Blue for Word
+          else if (['xls', 'xlsx', 'csv'].includes(ext || '')) { iconName = "stats-chart"; iconColor = "#43A047"; } // Green for Excel
+          else if (['jpg', 'jpeg', 'png'].includes(ext || '')) { iconName = "image"; iconColor = "#8E24AA"; } // Purple for Images
+          else if (['mp3', 'wav', 'm4a', 'aac'].includes(ext || '')) { iconName = "musical-notes"; iconColor = "#FB8C00"; } // Orange for Audio
+          else if (['mp4'].includes(ext || '')) { iconName = "videocam"; iconColor = "#E53935"; } // Red for Video
+
           return (
-              <View style={styles.documentContainer}>
-                  <View style={styles.docIcon}><Ionicons name="document-text" size={24} color={theme.colors.primary} /></View>
+              <TouchableOpacity onPress={() => Linking.openURL(item.mediaUrl!)} style={styles.documentContainer}>
+                  <View style={[styles.docIcon, { backgroundColor: iconColor + '20' }]}>
+                      <Ionicons name={iconName} size={24} color={iconColor} />
+                  </View>
                   <Text style={styles.docText} numberOfLines={1}>{item.fileName || "Document"}</Text>
-              </View>
+              </TouchableOpacity>
           );
       }
 
@@ -286,7 +358,8 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
       }
       
       if (item.type === 'voice') {
-          // Simplified Voice Render for brevity (Restoring previous UI logic)
+          const isPlaying = playingAudioId === item.id;
+          const progressWidth = isPlaying ? playbackAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) : '0%';
           return (
               <View style={styles.voiceContainer}>
                   <TouchableOpacity onPress={() => handlePlayAudio(item.id, item.mediaUrl!)}>
@@ -384,7 +457,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
         {/* INPUT AREA */}
         <View style={styles.inputWrapper}>
-            {/* EDITING / REPLYING BANNER */}
             {(replyingTo || editingMessage) && (
                 <View style={styles.replyBanner}>
                     <View style={{flex: 1}}>
@@ -396,7 +468,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             )}
 
             <View style={styles.inputBar}>
-                {/* ATTACH BUTTON (Triggers Menu) */}
+                {/* ATTACH BUTTON */}
                 <TouchableOpacity style={styles.attachBtn} onPress={() => setAttachmentMenuVisible(true)}>
                     <Ionicons name="add" size={28} color={theme.colors.primary} />
                 </TouchableOpacity>
@@ -495,7 +567,6 @@ const styles = StyleSheet.create({
   voiceProgress: { height: '100%', backgroundColor: theme.colors.primary },
   metaContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 2 },
   timeText: { fontSize: 10 },
-  textDark: { color: '#999' },
   replyContext: { backgroundColor: 'rgba(0,0,0,0.05)', padding: 6, borderRadius: 8, marginBottom: 6, borderLeftWidth: 3, borderLeftColor: theme.colors.primary },
   replyBar: { position: 'absolute' },
   replyName: { fontSize: 11, fontWeight: '700', color: theme.colors.primary, marginBottom: 2 },
@@ -522,13 +593,11 @@ const styles = StyleSheet.create({
   popupItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
   popupText: { fontSize: 16, color: '#333', fontWeight: '500' },
   reactionsContainer: { flexDirection: 'row', position: 'absolute', bottom: -10, left: 10, backgroundColor: '#fff', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, borderWidth: 1, borderColor: '#eee', elevation: 1 },
-  
-  // ATTACHMENT MENU STYLES
   attachmentMenu: { position: 'absolute', bottom: 80, left: 20, backgroundColor: 'white', borderRadius: 16, padding: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 5, minWidth: 150 },
   attachmentItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 10 },
   attachmentText: { fontSize: 16, fontWeight: '500', marginLeft: 15, color: '#333' },
   iconCircle: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
   documentContainer: { flexDirection: 'row', alignItems: 'center', padding: 10, backgroundColor: '#F5F5F5', borderRadius: 10, minWidth: 150 },
-  docIcon: { marginRight: 10 },
+  docIcon: { marginRight: 10, width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
   docText: { flex: 1, fontSize: 14, fontWeight: '500', color: '#333' }
 });
