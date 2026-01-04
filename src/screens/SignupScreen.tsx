@@ -35,6 +35,28 @@ export const SignupScreen = ({ navigation }: Props) => {
     return dobRegex.test(dob);
   };
 
+  const formatDOB = (text: string): string => {
+    const cleaned = text.replace(/\D/g, '');
+    let formatted = '';
+
+    if (cleaned.length > 0) {
+      formatted = cleaned.slice(0, 2);
+    }
+    if (cleaned.length > 2) {
+      formatted += '/' + cleaned.slice(2, 4);
+    }
+    if (cleaned.length > 4) {
+      formatted += '/' + cleaned.slice(4, 8);
+    }
+
+    return formatted;
+  };
+
+  const handleDOBChange = (text: string) => {
+    const formatted = formatDOB(text);
+    setDob(formatted);
+  };
+
   const handleSignup = async () => {
     setError('');
 
@@ -71,14 +93,26 @@ export const SignupScreen = ({ navigation }: Props) => {
     setLoading(true);
 
     try {
-      const { data: existingProfile } = await supabase
+      const { data: existingUsername } = await supabase
         .from('profiles')
         .select('username')
         .eq('username', username)
         .maybeSingle();
 
-      if (existingProfile) {
+      if (existingUsername) {
         setError('Username already taken');
+        setLoading(false);
+        return;
+      }
+
+      const { data: existingPhone } = await supabase
+        .from('profiles')
+        .select('phone_number')
+        .eq('phone_number', phoneNumber)
+        .maybeSingle();
+
+      if (existingPhone) {
+        setError('Phone number already registered');
         setLoading(false);
         return;
       }
@@ -180,9 +214,12 @@ export const SignupScreen = ({ navigation }: Props) => {
                 style={styles.input}
                 placeholder="DD/MM/YYYY"
                 value={dob}
-                onChangeText={setDob}
+                onChangeText={handleDOBChange}
+                keyboardType="numeric"
+                maxLength={10}
                 placeholderTextColor={theme.colors.textMuted}
               />
+              <Text style={styles.helperText}>Format: DD/MM/YYYY (automatically formatted)</Text>
             </View>
 
             <View style={styles.inputContainer}>
