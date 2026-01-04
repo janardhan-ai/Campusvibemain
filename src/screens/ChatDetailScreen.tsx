@@ -50,29 +50,9 @@ const getRelativeDate = (dateString: string) => {
 };
 
 // --- MOCK UPLOAD FUNCTION ---
-// In a real app, this sends the file to Supabase/AWS and returns a public URL.
 const uploadToStorage = async (localUri: string, type: 'image' | 'video' | 'voice') => {
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    // --- REAL BACKEND CODE WOULD LOOK LIKE THIS: ---
-    /*
-    const filename = localUri.split('/').pop();
-    const formData = new FormData();
-    formData.append('file', {
-        uri: localUri,
-        name: filename,
-        type: type === 'video' ? 'video/mp4' : type === 'image' ? 'image/jpeg' : 'audio/m4a'
-    } as any);
-
-    const { data, error } = await supabase.storage.from('chat-media').upload(filename, formData);
-    if (error) throw error;
-    const { publicUrl } = supabase.storage.from('chat-media').getPublicUrl(filename);
-    return publicUrl;
-    */
-
-    // For now, return the local URI so the demo works without a server
-    return localUri; 
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate delay
+    return localUri; // Returns local URI for demo purposes
 };
 
 export const ChatDetailScreen = ({ route, navigation }: Props) => {
@@ -152,12 +132,11 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
   }, [chatId, recipient.id]);
 
-  // --- BACKEND-READY SEND LOGIC ---
+  // --- SEND LOGIC ---
   const sendGenericMessage = async (type: 'text' | 'image' | 'video' | 'voice', content: string, extraData: any = {}) => {
     const tempId = Date.now().toString();
     const myAvatar = currentUser?.avatar || 'https://i.pravatar.cc/150?img=11';
 
-    // 1. OPTIMISTIC UPDATE: Show message immediately with LOCAL data
     const localMessage: EnhancedMessage = {
       id: tempId,
       conversation_id: chatId || 'temp_id',
@@ -167,10 +146,10 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
       content: content,
       is_read: false,
       created_at: new Date().toISOString(),
-      status: 'sent', // Shows one tick immediately
+      status: 'sent', 
       type: type,
       replyTo: replyingTo || undefined,
-      ...extraData // Contains local uri (file://...)
+      ...extraData 
     };
 
     setCurrentMessages(prev => [...prev, localMessage]);
@@ -180,24 +159,16 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
     try {
         let finalMediaUrl = extraData.mediaUrl;
-
-        // 2. UPLOAD MEDIA (If exists)
         if (type !== 'text' && extraData.mediaUrl) {
-            // Upload local file to cloud and get public URL
             finalMediaUrl = await uploadToStorage(extraData.mediaUrl, type);
         }
 
-        // 3. SIMULATE DATABASE INSERT (Mocking backend delay)
-        // await supabase.from('messages').insert({ ...localMessage, mediaUrl: finalMediaUrl });
-        await new Promise(resolve => setTimeout(resolve, 500)); // DB Latency
+        await new Promise(resolve => setTimeout(resolve, 500)); // Mock DB Insert delay
 
-        // 4. UPDATE STATUS TO 'DELIVERED'
-        // Replace the local URI with the public URL (if uploaded) and update tick status
         setCurrentMessages(prev => prev.map(m => 
             m.id === tempId ? { ...m, status: 'delivered', mediaUrl: finalMediaUrl } : m
         ));
 
-        // 5. SIMULATE 'READ' STATUS (After a delay)
         setTimeout(() => {
             setCurrentMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'read' } : m));
         }, 3000);
@@ -205,7 +176,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     } catch (error) {
         console.error("Send failed", error);
         Alert.alert("Failed to send message");
-        // Mark message as failed in UI (optional logic)
     }
   };
 
@@ -351,7 +321,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             sender_id: recipient.id,
             sender_name: recipient.name,
             sender_avatar: recipient.avatar,
-            content: "That's awesome! 🔥",
+            content: "Looks good! 👍",
             is_read: true,
             created_at: new Date().toISOString(),
             type: 'text',
@@ -406,29 +376,34 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
               outputRange: ['0%', '100%']
           }) : '0%';
 
+          // UPDATED: Voice note UI for light background
           return (
               <View style={styles.voiceContainer}>
                   <TouchableOpacity onPress={() => handlePlayAudio(item.id, item.mediaUrl!)}>
                       <Ionicons 
                         name={isPlaying ? "pause-circle" : "play-circle"} 
                         size={36} 
-                        color={isMyMessage ? '#fff' : theme.colors.primary} 
+                        color={theme.colors.primary} // Always primary color
                       />
                   </TouchableOpacity>
                   <View style={styles.voiceWaveform}>
-                      <View style={[styles.voiceTrack, { backgroundColor: isMyMessage ? 'rgba(255,255,255,0.3)' : '#ddd' }]}>
+                      {/* UPDATED: Track color for sent message */}
+                      <View style={[styles.voiceTrack, { backgroundColor: isMyMessage ? '#CFD8DC' : '#ddd' }]}>
                           <Animated.View style={[
                               styles.voiceProgress, 
-                              { width: progressWidth as any, backgroundColor: isMyMessage ? '#fff' : theme.colors.primary } 
+                              // UPDATED: Progress fill always primary
+                              { width: progressWidth as any, backgroundColor: theme.colors.primary } 
                           ]} />
                       </View>
-                      <Text style={[styles.voiceDuration, { color: isMyMessage ? '#fff' : '#666' }]}>{item.duration || '0:00'}</Text>
+                      {/* UPDATED: Duration text always dark gray */}
+                      <Text style={[styles.voiceDuration, { color: '#666' }]}>{item.duration || '0:00'}</Text>
                   </View>
               </View>
           );
       }
 
-      return <Text style={[styles.messageText, isMyMessage ? styles.textLight : styles.textDark]}>{item.content}</Text>;
+      // UPDATED: Text color is always dark now
+      return <Text style={[styles.messageText, styles.textDark]}>{item.content}</Text>;
   };
 
   const renderMessageItem = ({ item, index }: { item: EnhancedMessage; index: number }) => {
@@ -468,14 +443,16 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
              )}
              {renderMessageContent(item, isMyMessage)}
              <View style={styles.metaContainer}>
-                 <Text style={[styles.timeText, isMyMessage ? styles.timeLight : styles.timeDark]}>
+                 {/* UPDATED: Time is always dark gray */}
+                 <Text style={[styles.timeText, styles.timeDark]}>
                      {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                  </Text>
                  {isMyMessage && (
                      <Ionicons 
                         name={item.status === 'read' ? "checkmark-done" : item.status === 'delivered' ? "checkmark-done" : "checkmark"} 
                         size={14} 
-                        color={item.status === 'read' ? '#bbf7d0' : 'rgba(255,255,255,0.7)'} 
+                        // UPDATED: Ticks are primary if read, dark gray otherwise
+                        color={item.status === 'read' ? theme.colors.primary : '#999'} 
                         style={{ marginLeft: 4 }}
                      />
                  )}
@@ -634,13 +611,18 @@ const styles = StyleSheet.create({
   avatarContainerRight: { width: 28, marginLeft: 8, paddingBottom: 4 },
   avatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#ccc' },
   bubble: { maxWidth: '75%', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, elevation: 1 },
+  
+  // UPDATED STYLES FOR CLEANER UI
   bubbleLeft: { backgroundColor: '#fff', borderBottomLeftRadius: 4 },
+  bubbleRight: { backgroundColor: '#E9EFF5', borderBottomRightRadius: 4 }, // Light neutral gray-blue
+  
   bubbleLeftGroup: { borderBottomLeftRadius: 18, marginBottom: 2 },
-  bubbleRight: { backgroundColor: theme.colors.primary, borderBottomRightRadius: 4 },
   bubbleRightGroup: { borderBottomRightRadius: 18, marginBottom: 2 },
   messageText: { fontSize: 15, lineHeight: 21 },
-  textLight: { color: '#fff' },
+  
+  // UPDATED: Removed textLight, kept only textDark
   textDark: { color: '#111' },
+  
   mediaImage: { width: 200, height: 150, borderRadius: 12, resizeMode: 'cover' },
   videoOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 12 },
   voiceContainer: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 150 },
@@ -650,8 +632,10 @@ const styles = StyleSheet.create({
   voiceDuration: { fontSize: 11, color: '#666' },
   metaContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 2 },
   timeText: { fontSize: 10 },
-  timeLight: { color: 'rgba(255,255,255,0.7)' },
+  
+  // UPDATED: Removed timeLight, kept only timeDark
   timeDark: { color: '#999' },
+
   replyContext: { backgroundColor: 'rgba(0,0,0,0.1)', padding: 6, borderRadius: 8, marginBottom: 6, borderLeftWidth: 3, borderLeftColor: 'rgba(0,0,0,0.3)' },
   replyBar: { position: 'absolute' },
   replyName: { fontSize: 11, fontWeight: '700', color: 'rgba(0,0,0,0.6)', marginBottom: 2 },
