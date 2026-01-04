@@ -24,7 +24,7 @@ import { useApp } from '../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 import { Message } from '../data/messages';
 import * as ImagePicker from 'expo-image-picker'; 
-import { Video, ResizeMode, Audio } from 'expo-av'; // ADDED Audio
+import { Video, ResizeMode, Audio } from 'expo-av'; 
 
 const { width, height } = Dimensions.get('window');
 
@@ -74,6 +74,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   const [fullScreenMedia, setFullScreenMedia] = useState<{ url: string, type: 'image' | 'video' } | null>(null);
 
   // --- RECORDING STATE (REAL) ---
+  const [isRecording, setIsRecording] = useState(false); // <--- FIXED: Added this missing line
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingAnim = useRef(new Animated.Value(0)).current; 
@@ -92,7 +93,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
       try {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
-          playsInSilentModeIOS: true, // Fixes "No Sound" on iOS silent mode
+          playsInSilentModeIOS: true,
           staysActiveInBackground: false,
           shouldDuckAndroid: true,
           playThroughEarpieceAndroid: false,
@@ -103,12 +104,10 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     }
     setupAudio();
 
-    // Tab Bar Logic
     const parent = navigation.getParent();
     if (parent) parent.setOptions({ tabBarStyle: { display: 'none' } });
     return () => { 
         if (parent) parent.setOptions({ tabBarStyle: { height: 56, paddingBottom: 6, paddingTop: 6, display: 'flex' } });
-        // Cleanup sound on unmount
         if (sound) sound.unloadAsync();
     };
   }, []);
@@ -134,17 +133,14 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
   // --- REAL AUDIO PLAYBACK ---
   const handlePlayAudio = async (messageId: string, uri: string) => {
-      // 1. If playing current audio, toggle pause/stop (simplified to stop for now)
       if (playingAudioId === messageId) {
           await stopAudioPlayback();
           return;
       }
 
-      // 2. Stop any existing sound
       await stopAudioPlayback();
 
       try {
-          // 3. Load New Sound
           const { sound: newSound } = await Audio.Sound.createAsync(
               { uri: uri },
               { shouldPlay: true } 
@@ -153,13 +149,11 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
           setSound(newSound);
           setPlayingAudioId(messageId);
 
-          // 4. Update Progress Bar
           newSound.setOnPlaybackStatusUpdate((status) => {
               if (status.isLoaded) {
                   if (status.didJustFinish) {
                       stopAudioPlayback();
                   } else {
-                      // Calculate progress 0 to 1
                       const progress = status.positionMillis / (status.durationMillis || 1);
                       playbackAnim.setValue(progress);
                   }
@@ -244,11 +238,9 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   // --- REAL RECORDING LOGIC ---
   const startRecording = async () => {
     try {
-        // Request Permissions
         const perm = await Audio.requestPermissionsAsync();
         if (perm.status !== "granted") return;
 
-        // Configure for Recording
         await Audio.setAudioModeAsync({
             allowsRecordingIOS: true,
             playsInSilentModeIOS: true,
@@ -258,10 +250,8 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
         setIsRecording(true);
         setRecordingDuration(0);
         
-        // Start Timer UI
         timerRef.current = setInterval(() => { setRecordingDuration(prev => prev + 1); }, 1000);
         
-        // Start Pulse Animation
         Animated.loop(
             Animated.sequence([
                 Animated.timing(recordingAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
@@ -269,7 +259,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             ])
         ).start();
 
-        // Start Actual Recording
         const { recording: newRecording } = await Audio.Recording.createAsync(
             Audio.RecordingOptionsPresets.HIGH_QUALITY
         );
@@ -285,14 +274,12 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     if (timerRef.current) clearInterval(timerRef.current);
     recordingAnim.stopAnimation();
     
-    // Stop Actual Recording
     if (!recording) return;
     
     try {
         await recording.stopAndUnloadAsync();
         const uri = recording.getURI(); 
         
-        // Reset Audio Mode for Playback
         await Audio.setAudioModeAsync({
             allowsRecordingIOS: false,
             playsInSilentModeIOS: true,
@@ -300,7 +287,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
         setRecording(null);
 
-        // Send the real file URI
         if (recordingDuration >= 1 && uri) {
             const min = Math.floor(recordingDuration / 60);
             const sec = recordingDuration % 60;
@@ -323,7 +309,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
   // --- RENDERERS ---
   const renderMessageContent = (item: EnhancedMessage, isMyMessage: boolean) => {
-      // 1. IMAGE & VIDEO
       if ((item.type === 'image' || item.type === 'video') && item.mediaUrl) {
           return (
               <TouchableOpacity onPress={() => handleMediaPress(item.mediaUrl!, item.type as any)}>
@@ -347,10 +332,8 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
           );
       }
       
-      // 2. VOICE MESSAGE
       if (item.type === 'voice') {
           const isPlaying = playingAudioId === item.id;
-          
           const progressWidth = isPlaying ? playbackAnim.interpolate({
               inputRange: [0, 1],
               outputRange: ['0%', '100%']
@@ -384,7 +367,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
           );
       }
 
-      // 3. TEXT
       return (
           <Text style={[styles.messageText, isMyMessage ? styles.textLight : styles.textDark]}>
               {item.content}
@@ -416,7 +398,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
           <TouchableOpacity 
               activeOpacity={0.8}
-              // Removed LongPress to reduce complexity for now, focus on playback
               style={[
                   styles.bubble, 
                   isMyMessage ? styles.bubbleRight : styles.bubbleLeft,
@@ -465,7 +446,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     <View style={styles.mainContainer}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
       
-      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
@@ -499,8 +479,8 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             {replyingTo && (
                 <View style={styles.replyBanner}>
                     <View style={{flex: 1}}>
-                        <Text style={styles.replyBannerTitle}>Replying to...</Text>
-                        <Text style={styles.replyBannerText} numberOfLines={1}>...</Text>
+                        <Text style={styles.replyBannerTitle}>Replying to {replyingTo.sender_id === currentUser?.id ? 'Yourself' : replyingTo.sender_name}</Text>
+                        <Text style={styles.replyBannerText} numberOfLines={1}>{replyingTo.type === 'image' ? '📷 Photo' : replyingTo.type === 'voice' ? '🎤 Voice Message' : replyingTo.content}</Text>
                     </View>
                     <TouchableOpacity onPress={() => setReplyingTo(null)}><Ionicons name="close" size={20} color="#666" /></TouchableOpacity>
                 </View>
@@ -555,7 +535,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
         </View>
       </KeyboardAvoidingView>
 
-      {/* FULL SCREEN MEDIA MODAL (VIDEO & IMAGE) */}
+      {/* FULL SCREEN MEDIA MODAL */}
       <Modal visible={!!fullScreenMedia} transparent animationType="fade" onRequestClose={() => setFullScreenMedia(null)}>
           <View style={styles.fullScreenContainer}>
               <TouchableOpacity style={styles.fullScreenClose} onPress={() => setFullScreenMedia(null)}>
