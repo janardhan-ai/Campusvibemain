@@ -25,7 +25,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Message } from '../data/messages';
 import * as ImagePicker from 'expo-image-picker'; 
 import { Video, ResizeMode, Audio } from 'expo-av'; 
-import * as Clipboard from 'expo-clipboard'; // npx expo install expo-clipboard
+import * as Clipboard from 'expo-clipboard'; // Ensure you ran: npx expo install expo-clipboard
 
 const { width, height } = Dimensions.get('window');
 
@@ -197,7 +197,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
       const index = currentMessages.findIndex(m => m.id === replyId);
       if (index !== -1 && flatListRef.current) {
           flatListRef.current.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
-          // Optional: Flash the message to highlight it
       }
   };
 
@@ -254,15 +253,117 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     simulateIncomingMessage();
   };
 
-  // --- MEDIA & RECORDING (Same as previous) ---
+  // --- MEDIA HANDLERS ---
   const handleMediaPress = (url: string, type: 'image' | 'video') => { setFullScreenMedia({ url, type }); };
-  const openGallery = async () => { /* ... (Same Logic) ... */ };
-  const openCamera = async () => { /* ... (Same Logic) ... */ };
-  const startRecording = async () => { /* ... (Same Logic) ... */ };
-  const stopRecording = async () => { /* ... (Same Logic) ... */ };
-  const handlePlayAudio = async (id: string, uri: string) => { /* ... (Same Logic) ... */ };
+
+  const handlePlayAudio = async (messageId: string, uri: string) => {
+      if (playingAudioId === messageId) { await stopAudioPlayback(); return; }
+      await stopAudioPlayback();
+      try {
+          const { sound: newSound } = await Audio.Sound.createAsync({ uri: uri }, { shouldPlay: true });
+          setSound(newSound);
+          setPlayingAudioId(messageId);
+          newSound.setOnPlaybackStatusUpdate((status) => {
+              if (status.isLoaded) {
+                  if (status.didJustFinish) { stopAudioPlayback(); } 
+                  else { playbackAnim.setValue(status.positionMillis / (status.durationMillis || 1)); }
+              }
+          });
+      } catch (error) { console.log("Error playing audio:", error); }
+  };
+
+  const stopAudioPlayback = async () => {
+      if (sound) { await sound.unloadAsync(); setSound(null); }
+      setPlayingAudioId(null);
+      playbackAnim.setValue(0);
+  };
+
+  // --- REAL DEVICE MEDIA PICKER ---
+  const openGallery = async () => {
+    try {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') { Alert.alert("Permission denied"); return; }
+        const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.All, allowsEditing: true, quality: 1 });
+        if (!result.canceled) {
+            const asset = result.assets[0];
+            const type = asset.type === 'video' ? 'video' : 'image';
+            sendGenericMessage(type, type === 'video' ? 'Video' : 'Photo', { mediaUrl: asset.uri });
+        }
+    } catch (error) { console.log(error); }
+  };
+
+  const openCamera = async () => {
+    try {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') { Alert.alert("Permission denied"); return; }
+        const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 1 });
+        if (!result.canceled) { sendGenericMessage('image', 'Photo', { mediaUrl: result.assets[0].uri }); }
+    } catch (error) { console.log(error); }
+  };
+
+  // --- RECORDING ---
+  const startRecording = async () => {
+    try {
+        const perm = await Audio.requestPermissionsAsync();
+        if (perm.status !== "granted") return;
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+        Vibration.vibrate(50);
+        setIsRecording(true);
+        setRecordingDuration(0);
+        timerRef.current = setInterval(() => { setRecordingDuration(prev => prev + 1); }, 1000);
+        Animated.loop(Animated.sequence([
+            Animated.timing(recordingAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+            Animated.timing(recordingAnim, { toValue: 0, duration: 500, useNativeDriver: true })
+        ])).start();
+        const { recording: newRecording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+        setRecording(newRecording);
+    } catch (err) { console.error('Failed to start recording', err); }
+  };
+
+  const stopRecording = async () => {
+    setIsRecording(false);
+    if (timerRef.current) clearInterval(timerRef.current);
+    recordingAnim.stopAnimation();
+    if (!recording) return;
+    try {
+        await recording.stopAndUnloadAsync();
+        const uri = recording.getURI(); 
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+        setRecording(null);
+        if (recordingDuration >= 1 && uri) {
+            const min = Math.floor(recordingDuration / 60);
+            const sec = recordingDuration % 60;
+            const durationStr = `${min}:${sec < 10 ? '0' : ''}${sec}`;
+            sendGenericMessage('voice', 'Voice Message', { mediaUrl: uri, duration: durationStr });
+        }
+    } catch (error) { console.log("Error stopping recording", error); }
+  };
+
+  const formatDuration = (seconds: number) => {
+      const min = Math.floor(seconds / 60);
+      const sec = seconds % 60;
+      return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+  };
+
   const simulateIncomingMessage = () => {
-    // ... (Same Logic)
+    setTimeout(() => setIsTyping(true), 2000);
+    setTimeout(() => {
+        setIsTyping(false);
+        const replyMsg: EnhancedMessage = {
+            id: Date.now().toString(),
+            conversation_id: chatId || 'temp_id',
+            sender_id: recipient.id,
+            sender_name: recipient.name,
+            sender_avatar: recipient.avatar,
+            content: "Got it! 👌",
+            is_read: true,
+            created_at: new Date().toISOString(),
+            type: 'text',
+            status: 'read'
+        };
+        setCurrentMessages(prev => [...prev, replyMsg]);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+    }, 4000);
   };
 
   // --- RENDERERS ---
@@ -412,7 +513,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             contentContainerStyle={styles.listContent}
             ListFooterComponent={isTyping ? <View style={{ marginLeft: 50, marginBottom: 10 }}><Text style={{ color: '#999', fontSize: 12, fontStyle: 'italic' }}>{recipient.name} is typing...</Text></View> : null}
             ListEmptyComponent={loading ? null : <View style={styles.emptyState}><Ionicons name="chatbubble-ellipses-outline" size={64} color="#ddd" /><Text style={styles.emptyText}>No messages yet</Text></View>}
-            onScrollToIndexFailed={() => {}} // Handle scroll fail gracefully
+            onScrollToIndexFailed={() => {}} 
         />
 
         {/* INPUT */}
@@ -436,7 +537,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                         <Animated.View style={{ opacity: recordingAnim, marginRight: 10 }}>
                             <View style={styles.redDot} />
                         </Animated.View>
-                        <Text style={styles.recordingText}>{recordingDuration}s</Text>
+                        <Text style={styles.recordingText}>{formatDuration(recordingDuration)}</Text>
                         <Text style={styles.recordingHint}>Slide to cancel</Text>
                     </View>
                 ) : (
@@ -528,7 +629,7 @@ const styles = StyleSheet.create({
   avatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#ccc' },
   bubble: { maxWidth: '75%', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, elevation: 1 },
   bubbleLeft: { backgroundColor: '#fff', borderBottomLeftRadius: 4 },
-  bubbleRight: { backgroundColor: '#E9EFF5', borderBottomRightRadius: 4 },
+  bubbleRight: { backgroundColor: '#E9EFF5', borderBottomRightRadius: 4 }, // Neutral Sent Color
   bubbleLeftGroup: { borderBottomLeftRadius: 18, marginBottom: 2 },
   bubbleRightGroup: { borderBottomRightRadius: 18, marginBottom: 2 },
   messageText: { fontSize: 15, lineHeight: 21 },
