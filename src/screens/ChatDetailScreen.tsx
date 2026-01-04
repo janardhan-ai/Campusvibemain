@@ -23,8 +23,11 @@ type Props = NativeStackScreenProps<HomeStackParamList, 'ChatDetail'>;
 export const ChatDetailScreen = ({ route, navigation }: Props) => {
   const params = route.params as any; 
   const { currentUser, messages } = useApp();
+  
+  // 1. SAFETY: Ensure allChats is an array
   const allChats = messages || []; 
   
+  // 2. RESOLVE RECIPIENT
   let recipient = params.recipient;
 
   if (!recipient && params.userId) {
@@ -43,6 +46,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
      }
   }
   
+  // Safety check to prevent crash if recipient not found
   if (!recipient) {
       return (
         <View style={[styles.container, styles.center]}>
@@ -53,11 +57,13 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
   const chatId = params.chatId;
 
+  // --- STATE ---
   const [currentMessages, setCurrentMessages] = useState<Message[]>([]);
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
   const flatListRef = useRef<FlatList>(null);
 
+  // Hide Tab Bar
   useEffect(() => {
     const parent = navigation.getParent();
     parent?.setOptions({ tabBarStyle: { display: 'none' } });
@@ -68,13 +74,16 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     };
   }, [navigation]);
 
+  // --- LOAD MESSAGES ---
   useEffect(() => {
     let targetMessages: Message[] = [];
 
     if (chatId) {
+       // A. Have ID -> Load Chat
        const chat = allChats.find(c => c.id === chatId);
        if (chat) targetMessages = chat.messages;
     } else {
+       // B. No ID (New Chat) -> Check if history exists
        const existingChat = allChats.find(c => 
           c.participants.some(p => p.id === recipient.id)
        );
@@ -84,14 +93,16 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     setCurrentMessages(targetMessages);
     setLoading(false);
     
+    // Scroll to bottom
     setTimeout(() => {
         if (flatListRef.current) {
             flatListRef.current.scrollToEnd({ animated: false });
         }
     }, 100);
     
-  }, [chatId, recipient.id]); 
+  }, [chatId, recipient.id]); // Dependency array excludes allChats to prevent infinite loops/flickering
 
+  // --- SEND MESSAGE ---
   const sendMessage = () => {
     if (!messageText.trim()) return;
 
@@ -120,7 +131,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   };
 
   const shouldShowAvatar = (index: number) => {
-    // Show avatar only on the LAST message of a sequence from the same user
     if (index === currentMessages.length - 1) return true;
     const currentMsg = currentMessages[index];
     const nextMsg = currentMessages[index + 1];
@@ -149,7 +159,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
         )}
         <View style={[styles.messageContainer, isMyMessage ? styles.myMessageContainer : styles.theirMessageContainer]}>
           
-          {/* LEFT SIDE (Their Avatar) */}
+          {/* LEFT AVATAR (Theirs) */}
           {!isMyMessage && (
             <View style={styles.avatarPlaceholder}>
               {showAvatar && (
@@ -158,7 +168,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             </View>
           )}
 
-          {/* MESSAGE BUBBLE */}
+          {/* BUBBLE */}
           <View style={[
             styles.messageBubble,
             isMyMessage ? styles.myMessageBubble : styles.theirMessageBubble,
@@ -170,7 +180,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             </Text>
           </View>
 
-          {/* RIGHT SIDE (My Avatar - NEW ADDITION) */}
+          {/* RIGHT AVATAR (Mine) */}
           {isMyMessage && (
             <View style={styles.avatarPlaceholder}>
                {showAvatar && (
@@ -178,7 +188,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                )}
             </View>
           )}
-
         </View>
       </View>
     );
@@ -187,8 +196,9 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={0}
+      // FIX: Use 'undefined' for Android to fix the whitespace gap issue
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
