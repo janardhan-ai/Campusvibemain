@@ -13,7 +13,9 @@ import {
   Alert,
   Vibration,
   StatusBar,
-  SafeAreaView
+  Modal,
+  TouchableWithoutFeedback,
+  Animated
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { HomeStackParamList } from '../types';
@@ -26,8 +28,9 @@ type Props = NativeStackScreenProps<HomeStackParamList, 'ChatDetail'>;
 
 interface EnhancedMessage extends Message {
   status?: 'sent' | 'delivered' | 'read';
-  type?: 'text' | 'image';
+  type?: 'text' | 'image' | 'voice';
   replyTo?: EnhancedMessage;
+  duration?: string; // For voice notes
 }
 
 const getRelativeDate = (dateString: string) => {
@@ -57,19 +60,33 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
   const chatId = params.chatId;
 
+  // --- STATE ---
   const [currentMessages, setCurrentMessages] = useState<EnhancedMessage[]>([]);
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
   const [isTyping, setIsTyping] = useState(false); 
   const [replyingTo, setReplyingTo] = useState<EnhancedMessage | null>(null); 
-  
+  const [showAttachments, setShowAttachments] = useState(false); // For Modal
+  const [isRecording, setIsRecording] = useState(false); // For Mic UI
+  const recordingAnim = useRef(new Animated.Value(0)).current; // For pulsing red dot
+
   const flatListRef = useRef<FlatList>(null);
 
+  // --- 1. TAB BAR FIX ---
+  // Ensure tab bar hides on mount and shows on unmount
   useEffect(() => {
     const parent = navigation.getParent();
-    parent?.setOptions({ tabBarStyle: { display: 'none' } });
-    return () => parent?.setOptions({ tabBarStyle: { height: 56, paddingBottom: 6, paddingTop: 6, display: 'flex' } });
-  }, [navigation]);
+    if (parent) {
+      parent.setOptions({ tabBarStyle: { display: 'none' } });
+    }
+    return () => {
+      if (parent) {
+        parent.setOptions({ 
+          tabBarStyle: { height: 56, paddingBottom: 6, paddingTop: 6, display: 'flex' } 
+        });
+      }
+    };
+  }, []); // Dependency array empty to run only once
 
   useEffect(() => {
     let targetMessages: EnhancedMessage[] = [];
@@ -85,29 +102,49 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
   }, [chatId, recipient.id]);
 
-  // --- BUTTON HANDLERS ---
-
-  const handleAttachment = () => {
-    Alert.alert("Attachment", "Choose an option", [
-      { text: "Document", onPress: () => console.log("Doc") },
-      { text: "Gallery", onPress: () => console.log("Gallery") },
-      { text: "Cancel", style: "cancel" }
-    ]);
+  // --- ATTACHMENT HANDLERS ---
+  const handleAttachmentPress = () => {
+    setShowAttachments(true);
   };
 
-  const handleCamera = () => {
-    Alert.alert("Camera", "Opening Camera...");
+  const handleGalleryOption = () => {
+    setShowAttachments(false);
+    // In a real app: launchImageLibraryAsync()
+    setTimeout(() => {
+        Alert.alert("Gallery", "Opening Photos & Videos...");
+    }, 300);
   };
 
-  const handleMic = () => {
+  const handleCameraOption = () => {
+    setShowAttachments(false);
+    // In a real app: launchCameraAsync()
+    setTimeout(() => {
+        Alert.alert("Camera", "Opening Camera...");
+    }, 300);
+  };
+
+  // --- MIC HANDLERS ---
+  const startRecording = () => {
     Vibration.vibrate(50);
-    Alert.alert("Microphone", "Hold to record audio (Feature coming soon)");
+    setIsRecording(true);
+    // Start pulse animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(recordingAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+        Animated.timing(recordingAnim, { toValue: 0, duration: 500, useNativeDriver: true })
+      ])
+    ).start();
+  };
+
+  const stopRecording = () => {
+    setIsRecording(false);
+    // In real app: save audio file and send
+    Alert.alert("Audio Sent", "Voice note sent!");
   };
 
   const handleSendMessage = () => {
     if (!messageText.trim()) return;
 
-    // Use current user avatar or a default fallback
     const myAvatar = currentUser?.avatar || 'https://i.pravatar.cc/150?img=11';
 
     const newMessage: EnhancedMessage = {
@@ -115,7 +152,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
       conversation_id: chatId || 'temp_id',
       sender_id: currentUser?.id || 'current-user',
       sender_name: currentUser?.name || 'You',
-      sender_avatar: myAvatar, // Ensure this is set!
+      sender_avatar: myAvatar,
       content: messageText,
       is_read: false,
       created_at: new Date().toISOString(),
@@ -127,7 +164,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     setMessageText('');
     setReplyingTo(null);
     
-    // Simulate Status Updates
     setTimeout(() => {
         setCurrentMessages(prev => prev.map(m => m.id === newMessage.id ? {...m, status: 'delivered'} : m));
     }, 1000);
@@ -185,7 +221,6 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
   const renderMessageItem = ({ item, index }: { item: EnhancedMessage; index: number }) => {
     const isMyMessage = item.sender_id === currentUser?.id;
-    // Show avatar if it's the last message in a group
     const showAvatar = index === currentMessages.length - 1 || currentMessages[index + 1]?.sender_id !== item.sender_id;
     
     const currentDate = getRelativeDate(item.created_at);
@@ -201,14 +236,12 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             onLongPress={() => handleLongPress(item)}
             style={[styles.messageRow, isMyMessage ? styles.rowRight : styles.rowLeft]}
         >
-          {/* LEFT AVATAR (Received) */}
           {!isMyMessage && (
              <View style={styles.avatarContainer}>
                  {showAvatar ? <Image source={{ uri: item.sender_avatar }} style={styles.avatar} /> : <View style={{width: 28}} />}
              </View>
           )}
 
-          {/* BUBBLE */}
           <View style={[
               styles.bubble, 
               isMyMessage ? styles.bubbleRight : styles.bubbleLeft,
@@ -241,13 +274,11 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
              </View>
           </View>
 
-          {/* RIGHT AVATAR (Sent) - VISIBLE NOW */}
           {isMyMessage && (
              <View style={styles.avatarContainerRight}>
                  {showAvatar ? <Image source={{ uri: item.sender_avatar }} style={styles.avatar} /> : <View style={{width: 28}} />}
              </View>
           )}
-
         </TouchableOpacity>
       </View>
     );
@@ -255,9 +286,9 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
 
   return (
     <View style={styles.mainContainer}>
-      {/* 1. STATUS BAR FIX */}
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
       
+      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
@@ -275,7 +306,10 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.headerOption}>
-            <Ionicons name="ellipsis-vertical" size={20} color={theme.colors.text} />
+            <Ionicons name="videocam-outline" size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.headerOption}>
+            <Ionicons name="call-outline" size={22} color={theme.colors.text} />
         </TouchableOpacity>
       </View>
 
@@ -308,7 +342,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             }
         />
 
-        {/* 3. INPUT AREA - FIXED PADDING */}
+        {/* --- INPUT AREA --- */}
         <View style={styles.inputWrapper}>
             {replyingTo && (
                 <View style={styles.replyBanner}>
@@ -323,30 +357,44 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             )}
 
             <View style={styles.inputBar}>
-                {/* ATTACH BUTTON */}
-                <TouchableOpacity style={styles.attachBtn} onPress={handleAttachment}>
-                    <Ionicons name="add" size={28} color={theme.colors.primary} />
-                </TouchableOpacity>
-                
-                <View style={styles.inputFieldContainer}>
-                    <TextInput
-                        style={styles.input}
-                        placeholder="Message..."
-                        value={messageText}
-                        onChangeText={setMessageText}
-                        multiline
-                        maxLength={1000}
-                    />
-                    {/* CAMERA BUTTON */}
-                    <TouchableOpacity style={styles.mediaBtn} onPress={handleCamera}>
-                        <Ionicons name="camera-outline" size={24} color="#999" />
-                    </TouchableOpacity>
-                </View>
+                {isRecording ? (
+                    // --- RECORDING UI ---
+                    <View style={styles.recordingContainer}>
+                        <Animated.View style={{ opacity: recordingAnim, marginRight: 10 }}>
+                            <View style={styles.redDot} />
+                        </Animated.View>
+                        <Text style={styles.recordingText}>0:05</Text>
+                        <Text style={styles.recordingHint}>Slide to cancel</Text>
+                    </View>
+                ) : (
+                    // --- NORMAL INPUT UI ---
+                    <>
+                        <TouchableOpacity style={styles.attachBtn} onPress={handleAttachmentPress}>
+                            <Ionicons name="add" size={28} color={theme.colors.primary} />
+                        </TouchableOpacity>
+                        
+                        <View style={styles.inputFieldContainer}>
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Message..."
+                                value={messageText}
+                                onChangeText={setMessageText}
+                                multiline
+                                maxLength={1000}
+                            />
+                            <TouchableOpacity style={styles.mediaBtn} onPress={handleCameraOption}>
+                                <Ionicons name="camera-outline" size={24} color="#999" />
+                            </TouchableOpacity>
+                        </View>
+                    </>
+                )}
 
-                {/* MIC / SEND BUTTON */}
+                {/* SEND / MIC BUTTON */}
                 <TouchableOpacity 
-                    style={[styles.sendBtn, !messageText.trim() && styles.micBtn]} 
-                    onPress={messageText.trim() ? handleSendMessage : handleMic}
+                    style={[styles.sendBtn, (!messageText.trim() && !isRecording) && styles.micBtn]} 
+                    onPress={messageText.trim() ? handleSendMessage : undefined}
+                    onLongPress={!messageText.trim() ? startRecording : undefined}
+                    onPressOut={!messageText.trim() ? stopRecording : undefined}
                 >
                     {messageText.trim() ? (
                         <Ionicons name="send" size={18} color="#fff" style={{ marginLeft: 2 }} />
@@ -357,6 +405,37 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* --- PROFESSIONAL ATTACHMENT MODAL --- */}
+      <Modal visible={showAttachments} transparent animationType="slide" onRequestClose={() => setShowAttachments(false)}>
+         <TouchableWithoutFeedback onPress={() => setShowAttachments(false)}>
+             <View style={styles.modalOverlay}>
+                 <View style={styles.bottomSheet}>
+                     <View style={styles.sheetHandle} />
+                     <Text style={styles.sheetTitle}>Share Content</Text>
+                     
+                     <TouchableOpacity style={styles.sheetOption} onPress={handleGalleryOption}>
+                         <View style={[styles.iconCircle, { backgroundColor: '#E3F2FD' }]}>
+                             <Ionicons name="images" size={24} color="#0288D1" />
+                         </View>
+                         <Text style={styles.sheetText}>Gallery (Photos & Videos)</Text>
+                     </TouchableOpacity>
+
+                     <TouchableOpacity style={styles.sheetOption} onPress={handleCameraOption}>
+                         <View style={[styles.iconCircle, { backgroundColor: '#E8F5E9' }]}>
+                             <Ionicons name="camera" size={24} color="#388E3C" />
+                         </View>
+                         <Text style={styles.sheetText}>Camera</Text>
+                     </TouchableOpacity>
+
+                     <TouchableOpacity style={styles.sheetCancel} onPress={() => setShowAttachments(false)}>
+                         <Text style={styles.sheetCancelText}>Cancel</Text>
+                     </TouchableOpacity>
+                 </View>
+             </View>
+         </TouchableWithoutFeedback>
+      </Modal>
+
     </View>
   );
 };
@@ -365,7 +444,7 @@ const styles = StyleSheet.create({
   mainContainer: { 
       flex: 1, 
       backgroundColor: '#f2f4f7', 
-      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 // Fixes collapsed Header
+      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 
   },
   container: { flex: 1 },
   center: { justifyContent: 'center', alignItems: 'center' },
@@ -389,7 +468,6 @@ const styles = StyleSheet.create({
 
   // LIST
   listContent: { paddingVertical: 15, paddingHorizontal: 12 },
-  
   dateHeaderContainer: { alignItems: 'center', marginVertical: 12 },
   dateHeaderText: { 
       fontSize: 11, fontWeight: '600', color: '#666', backgroundColor: '#e5e7eb', 
@@ -400,7 +478,6 @@ const styles = StyleSheet.create({
   messageRow: { flexDirection: 'row', marginBottom: 2, alignItems: 'flex-end' },
   rowLeft: { justifyContent: 'flex-start' },
   rowRight: { justifyContent: 'flex-end' },
-  
   avatarContainer: { width: 28, marginRight: 8, paddingBottom: 4 },
   avatarContainerRight: { width: 28, marginLeft: 8, paddingBottom: 4 },
   avatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#ccc' },
@@ -434,7 +511,7 @@ const styles = StyleSheet.create({
   // INPUT
   inputWrapper: { 
       backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee',
-      paddingBottom: Platform.OS === 'ios' ? 20 : 10 // Fixes collapsed input on bottom
+      paddingBottom: Platform.OS === 'ios' ? 20 : 5 
   },
   replyBanner: { 
       flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f0f0', 
@@ -456,12 +533,31 @@ const styles = StyleSheet.create({
       justifyContent: 'center', alignItems: 'center', marginLeft: 4 
   },
   micBtn: { 
-      width: 44, height: 44, borderRadius: 22, backgroundColor: theme.colors.primary, // Or a different color like #f5f5f5 for inactive look
-      justifyContent: 'center', alignItems: 'center', marginLeft: 4 
+      backgroundColor: theme.colors.primary, 
   },
-  sendBtnDisabled: { backgroundColor: '#b0bec5' },
+  
+  // RECORDING UI
+  recordingContainer: {
+      flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingHorizontal: 20, height: 44
+  },
+  redDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#ff3b30' },
+  recordingText: { fontSize: 16, color: '#ff3b30', fontWeight: '600' },
+  recordingHint: { fontSize: 14, color: '#999' },
 
+  // EMPTY
   emptyState: { alignItems: 'center', marginTop: 100 },
   emptyText: { fontSize: 18, fontWeight: '700', color: '#888', marginTop: 10 },
-  emptySub: { fontSize: 14, color: '#aaa' }
+  emptySub: { fontSize: 14, color: '#aaa' },
+
+  // BOTTOM SHEET MODAL
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  bottomSheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 40 },
+  sheetHandle: { width: 40, height: 4, backgroundColor: '#ddd', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
+  sheetTitle: { fontSize: 18, fontWeight: '700', marginBottom: 20, textAlign: 'center' },
+  sheetOption: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  iconCircle: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 15 },
+  sheetText: { fontSize: 16, fontWeight: '500', color: '#333' },
+  sheetCancel: { marginTop: 15, alignItems: 'center', paddingVertical: 10 },
+  sheetCancelText: { fontSize: 16, fontWeight: '700', color: 'red' }
 });
