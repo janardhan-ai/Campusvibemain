@@ -15,7 +15,7 @@ import {
   StatusBar,
   Animated,
   Modal,
-  SafeAreaView,
+  TouchableWithoutFeedback,
   Dimensions
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -25,6 +25,7 @@ import { useApp } from '../context/AppContext';
 import { Ionicons } from '@expo/vector-icons';
 import { Message } from '../data/messages';
 import * as ImagePicker from 'expo-image-picker'; 
+import { Video, ResizeMode } from 'expo-av'; // REQUIRED: npx expo install expo-av
 
 const { width, height } = Dimensions.get('window');
 
@@ -81,9 +82,10 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
   const recordingAnim = useRef(new Animated.Value(0)).current; 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Audio Playback State (Simulation)
+  // Audio Playback State (Visual Only)
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
-  const [playbackProgress, setPlaybackProgress] = useState(0); // 0 to 1
+  // We use an Animated.Value for smooth progress bar filling
+  const playbackAnim = useRef(new Animated.Value(0)).current;
 
   const flatListRef = useRef<FlatList>(null);
 
@@ -112,37 +114,38 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
       setFullScreenMedia({ url, type });
   };
 
-  const handlePlayAudio = (messageId: string, durationStr: string) => {
-      // If already playing this one, pause it (reset for simple simulation)
+  const handlePlayAudio = (messageId: string, durationStr: string = "0:05") => {
+      // If already playing, stop it
       if (playingAudioId === messageId) {
-          setPlayingAudioId(null);
-          setPlaybackProgress(0);
+          stopAudioPlayback();
           return;
       }
 
+      // Reset previous
+      stopAudioPlayback();
+
       setPlayingAudioId(messageId);
-      setPlaybackProgress(0);
-
-      // Parse duration string "0:04" -> 4 seconds
-      const [mins, secs] = durationStr.split(':').map(Number);
-      const totalSeconds = mins * 60 + secs;
-      const intervalMs = 100;
-      const steps = (totalSeconds * 1000) / intervalMs;
-      let currentStep = 0;
-
-      const interval = setInterval(() => {
-          currentStep++;
-          const progress = currentStep / steps;
-          setPlaybackProgress(progress);
-
-          if (progress >= 1) {
-              clearInterval(interval);
-              setPlayingAudioId(null);
-              setPlaybackProgress(0);
-          }
-      }, intervalMs);
       
-      // Store interval ID in a ref if you want to clear it on unmount (omitted for brevity)
+      // Parse duration to seconds (e.g. "0:05" -> 5)
+      const [mins, secs] = durationStr.split(':').map(Number);
+      const totalSeconds = (mins * 60) + secs;
+
+      // Animate progress bar from 0 to 1 over the duration
+      Animated.timing(playbackAnim, {
+          toValue: 1,
+          duration: totalSeconds * 1000,
+          useNativeDriver: false, // width doesn't support native driver
+      }).start(({ finished }) => {
+          if (finished) {
+              stopAudioPlayback();
+          }
+      });
+  };
+
+  const stopAudioPlayback = () => {
+      setPlayingAudioId(null);
+      playbackAnim.setValue(0);
+      playbackAnim.stopAnimation();
   };
 
   // --- SEND LOGIC ---
@@ -183,7 +186,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
         if (status !== 'granted') { Alert.alert("Permission denied"); return; }
 
         const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.All, // Allows Video
+            mediaTypes: ImagePicker.MediaTypeOptions.All, 
             allowsEditing: true,
             quality: 1,
         });
@@ -194,7 +197,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             sendGenericMessage(type, type === 'video' ? 'Video' : 'Photo', { mediaUrl: asset.uri });
         }
     } catch (error) {
-        // Fallback Simulation
+        // Fallback Simulation for Web/Simulators without Camera Roll
         sendGenericMessage('image', 'Photo', { mediaUrl: 'https://images.unsplash.com/photo-1517849845537-4d257902454a?q=80&w=600&auto=format&fit=crop' });
     }
   };
@@ -213,7 +216,8 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             sendGenericMessage('image', 'Photo', { mediaUrl: result.assets[0].uri });
         }
     } catch (error) {
-        sendGenericMessage('image', 'Photo', { mediaUrl: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?q=80&w=600&auto=format&fit=crop' });
+        // Fallback Simulation with a REAL VIDEO URL for testing
+        sendGenericMessage('video', 'Video', { mediaUrl: 'https://www.w3schools.com/html/mov_bbb.mp4' });
     }
   };
 
@@ -254,11 +258,22 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
       if ((item.type === 'image' || item.type === 'video') && item.mediaUrl) {
           return (
               <TouchableOpacity onPress={() => handleMediaPress(item.mediaUrl!, item.type as any)}>
-                  <Image source={{ uri: item.mediaUrl }} style={styles.mediaImage} />
-                  {item.type === 'video' && (
-                      <View style={styles.videoOverlay}>
-                          <Ionicons name="play-circle" size={40} color="rgba(255,255,255,0.8)" />
+                  {/* If it's a video, show a thumbnail or the video itself muted/paused */}
+                  {item.type === 'video' ? (
+                      <View>
+                         <Video
+                            source={{ uri: item.mediaUrl! }}
+                            style={styles.mediaImage}
+                            resizeMode={ResizeMode.COVER}
+                            useNativeControls={false}
+                            shouldPlay={false} // Don't auto play in list
+                         />
+                         <View style={styles.videoOverlay}>
+                             <Ionicons name="play-circle" size={40} color="rgba(255,255,255,0.8)" />
+                         </View>
                       </View>
+                  ) : (
+                      <Image source={{ uri: item.mediaUrl }} style={styles.mediaImage} />
                   )}
               </TouchableOpacity>
           );
@@ -267,9 +282,16 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
       // 2. VOICE MESSAGE
       if (item.type === 'voice') {
           const isPlaying = playingAudioId === item.id;
+          
+          // Interpolate width for progress bar
+          const progressWidth = isPlaying ? playbackAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: ['0%', '100%']
+          }) : '0%';
+
           return (
               <View style={styles.voiceContainer}>
-                  <TouchableOpacity onPress={() => handlePlayAudio(item.id, item.duration || '0:05')}>
+                  <TouchableOpacity onPress={() => handlePlayAudio(item.id, item.duration)}>
                       <Ionicons 
                         name={isPlaying ? "pause-circle" : "play-circle"} 
                         size={36} 
@@ -278,18 +300,18 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                   </TouchableOpacity>
                   
                   <View style={styles.voiceWaveform}>
-                      {/* Simulated Progress Bar */}
-                      <View style={[styles.voiceTrack, { backgroundColor: isMyMessage ? 'rgba(255,255,255,0.3)' : '#eee' }]}>
-                          <View style={[
+                      {/* Progress Bar Track */}
+                      <View style={[styles.voiceTrack, { backgroundColor: isMyMessage ? 'rgba(255,255,255,0.3)' : '#ddd' }]}>
+                          <Animated.View style={[
                               styles.voiceProgress, 
                               { 
-                                  width: isPlaying ? `${playbackProgress * 100}%` : '0%',
+                                  width: progressWidth as any,
                                   backgroundColor: isMyMessage ? '#fff' : theme.colors.primary 
                               } 
                           ]} />
                       </View>
                       <Text style={[styles.voiceDuration, { color: isMyMessage ? '#fff' : '#666' }]}>
-                          {item.duration}
+                          {item.duration || '0:00'}
                       </Text>
                   </View>
               </View>
@@ -308,8 +330,18 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
     const isMyMessage = item.sender_id === currentUser?.id;
     const showAvatar = index === currentMessages.length - 1 || currentMessages[index + 1]?.sender_id !== item.sender_id;
     
+    const currentDate = getRelativeDate(item.created_at);
+    const prevDate = index > 0 ? getRelativeDate(currentMessages[index - 1].created_at) : null;
+    const showDateHeader = currentDate !== prevDate;
+
     return (
-      <View style={{ marginBottom: 2 }}>
+      <View>
+        {showDateHeader && (
+            <View style={styles.dateHeaderContainer}>
+                <Text style={styles.dateHeaderText}>{currentDate}</Text>
+            </View>
+        )}
+        
         <View style={[styles.messageRow, isMyMessage ? styles.rowRight : styles.rowLeft]}>
           {!isMyMessage && (
              <View style={styles.avatarContainer}>
@@ -317,12 +349,26 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
              </View>
           )}
 
-          <View style={[
-              styles.bubble, 
-              isMyMessage ? styles.bubbleRight : styles.bubbleLeft,
-              !showAvatar && (isMyMessage ? styles.bubbleRightGroup : styles.bubbleLeftGroup),
-              (item.type === 'image' || item.type === 'video') && { padding: 4 }
-          ]}>
+          <TouchableOpacity 
+              activeOpacity={0.8}
+              onLongPress={() => handleLongPress(item)}
+              style={[
+                  styles.bubble, 
+                  isMyMessage ? styles.bubbleRight : styles.bubbleLeft,
+                  !showAvatar && (isMyMessage ? styles.bubbleRightGroup : styles.bubbleLeftGroup),
+                  (item.type === 'image' || item.type === 'video') && { padding: 4 }
+              ]}
+          >
+             {item.replyTo && (
+                 <View style={styles.replyContext}>
+                     <View style={styles.replyBar} />
+                     <Text style={styles.replyName}>{item.replyTo.sender_id === currentUser?.id ? 'You' : item.replyTo.sender_name}</Text>
+                     <Text style={styles.replyText} numberOfLines={1}>
+                         {item.replyTo.type === 'image' ? '📷 Photo' : item.replyTo.type === 'voice' ? '🎤 Voice Message' : item.replyTo.content}
+                     </Text>
+                 </View>
+             )}
+
              {renderMessageContent(item, isMyMessage)}
              
              <View style={styles.metaContainer}>
@@ -338,7 +384,13 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
                      />
                  )}
              </View>
-          </View>
+          </TouchableOpacity>
+
+          {isMyMessage && (
+             <View style={styles.avatarContainerRight}>
+                 {showAvatar ? <Image source={{ uri: item.sender_avatar }} style={styles.avatar} /> : <View style={{width: 28}} />}
+             </View>
+          )}
         </View>
       </View>
     );
@@ -357,7 +409,7 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             <Image source={{ uri: recipient.avatar }} style={styles.headerAvatar} />
             <View style={styles.headerTextContainer}>
                 <Text style={styles.headerName}>{recipient.name}</Text>
-                <Text style={styles.headerStatus}>Active now</Text>
+                <Text style={styles.headerStatus}>{isTyping ? 'typing...' : 'Active now'}</Text>
             </View>
         </TouchableOpacity>
         <TouchableOpacity style={styles.headerOption}><Ionicons name="videocam-outline" size={24} color={theme.colors.text} /></TouchableOpacity>
@@ -374,11 +426,22 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
             keyExtractor={item => item.id}
             renderItem={renderMessageItem}
             contentContainerStyle={styles.listContent}
+            ListFooterComponent={isTyping ? <View style={{ marginLeft: 50, marginBottom: 10 }}><Text style={{ color: '#999', fontSize: 12, fontStyle: 'italic' }}>{recipient.name} is typing...</Text></View> : null}
             ListEmptyComponent={loading ? null : <View style={styles.emptyState}><Ionicons name="chatbubble-ellipses-outline" size={64} color="#ddd" /><Text style={styles.emptyText}>No messages yet</Text></View>}
         />
 
         {/* INPUT */}
         <View style={styles.inputWrapper}>
+            {replyingTo && (
+                <View style={styles.replyBanner}>
+                    <View style={{flex: 1}}>
+                        <Text style={styles.replyBannerTitle}>Replying to {replyingTo.sender_id === currentUser?.id ? 'Yourself' : replyingTo.sender_name}</Text>
+                        <Text style={styles.replyBannerText} numberOfLines={1}>{replyingTo.type === 'image' ? '📷 Photo' : replyingTo.type === 'voice' ? '🎤 Voice Message' : replyingTo.content}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setReplyingTo(null)}><Ionicons name="close" size={20} color="#666" /></TouchableOpacity>
+                </View>
+            )}
+
             <View style={styles.inputBar}>
                 {isRecording ? (
                     <View style={styles.recordingContainer}>
@@ -428,20 +491,26 @@ export const ChatDetailScreen = ({ route, navigation }: Props) => {
         </View>
       </KeyboardAvoidingView>
 
-      {/* FULL SCREEN MEDIA MODAL */}
+      {/* FULL SCREEN MEDIA MODAL (VIDEO & IMAGE) */}
       <Modal visible={!!fullScreenMedia} transparent animationType="fade" onRequestClose={() => setFullScreenMedia(null)}>
           <View style={styles.fullScreenContainer}>
               <TouchableOpacity style={styles.fullScreenClose} onPress={() => setFullScreenMedia(null)}>
                   <Ionicons name="close" size={30} color="#fff" />
               </TouchableOpacity>
-              {fullScreenMedia && (
-                  <Image source={{ uri: fullScreenMedia.url }} style={styles.fullScreenImage} resizeMode="contain" />
-              )}
-              {fullScreenMedia?.type === 'video' && (
-                  <View style={styles.fullScreenVideoControls}>
-                      <Ionicons name="play-circle" size={64} color="rgba(255,255,255,0.8)" />
-                      <Text style={{color:'#fff', marginTop: 10}}>Video Playback Placeholder</Text>
-                  </View>
+              
+              {fullScreenMedia?.type === 'video' ? (
+                  <Video
+                      source={{ uri: fullScreenMedia.url }}
+                      style={styles.fullScreenImage}
+                      resizeMode={ResizeMode.CONTAIN}
+                      useNativeControls
+                      shouldPlay
+                      isLooping
+                  />
+              ) : (
+                  fullScreenMedia && (
+                      <Image source={{ uri: fullScreenMedia.url }} style={styles.fullScreenImage} resizeMode="contain" />
+                  )
               )}
           </View>
       </Modal>
@@ -463,12 +532,14 @@ const styles = StyleSheet.create({
   headerName: { fontSize: 16, fontWeight: '700', color: '#111' },
   headerStatus: { fontSize: 11, color: '#4ade80', fontWeight: '500' },
   headerOption: { padding: 8 },
+  onlineBadge: { position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, borderRadius: 5, backgroundColor: '#4ade80', borderWidth: 1.5, borderColor: '#fff' },
 
   listContent: { paddingVertical: 15, paddingHorizontal: 12 },
   messageRow: { flexDirection: 'row', marginBottom: 2, alignItems: 'flex-end' },
   rowLeft: { justifyContent: 'flex-start' },
   rowRight: { justifyContent: 'flex-end' },
   avatarContainer: { width: 28, marginRight: 8, paddingBottom: 4 },
+  avatarContainerRight: { width: 28, marginLeft: 8, paddingBottom: 4 },
   avatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#ccc' },
   
   bubble: { maxWidth: '75%', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, elevation: 1 },
@@ -520,10 +591,11 @@ const styles = StyleSheet.create({
 
   emptyState: { alignItems: 'center', marginTop: 100 },
   emptyText: { fontSize: 18, fontWeight: '700', color: '#888', marginTop: 10 },
+  dateHeaderContainer: { alignItems: 'center', marginVertical: 12 },
+  dateHeaderText: { fontSize: 11, fontWeight: '600', color: '#666', backgroundColor: '#e5e7eb', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, overflow: 'hidden' },
 
   // Full Screen
   fullScreenContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' },
   fullScreenImage: { width: width, height: height * 0.8 },
   fullScreenClose: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 10 },
-  fullScreenVideoControls: { position: 'absolute', alignItems: 'center' }
 });
