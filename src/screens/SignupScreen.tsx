@@ -22,577 +22,577 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'Signup'>;
 
 export const SignupScreen = ({ navigation }: Props) => {
 
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState('');
 
-  const [name, setName] = useState('');
+  const [name, setName] = useState('');
 
-  const [dob, setDob] = useState('');
+  const [dob, setDob] = useState('');
 
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState('');
 
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
 
-  const [password, setPassword] = useState('');
+  const [password, setPassword] = useState('');
 
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const [error, setError] = useState('');
+  const [error, setError] = useState('');
 
 
 
-  const validateUsername = (username: string): boolean => {
+  const validateUsername = (username: string): boolean => {
 
-    const usernameRegex = /^[a-zA-Z0-9_]+$/;
+    const usernameRegex = /^[a-zA-Z0-9_]+$/;
 
-    return usernameRegex.test(username) && username.length >= 3;
+    return usernameRegex.test(username) && username.length >= 3;
 
-  };
+  };
 
 
 
-  const validateEmail = (email: string): boolean => {
+  const validateEmail = (email: string): boolean => {
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-    return emailRegex.test(email);
+    return emailRegex.test(email);
 
-  };
+  };
 
 
 
-  const validateDOB = (dob: string): boolean => {
+  const validateDOB = (dob: string): boolean => {
 
-    const dobRegex = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/;
+    const dobRegex = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/;
 
-    return dobRegex.test(dob);
+    return dobRegex.test(dob);
 
-  };
+  };
 
 
 
-  const formatDOB = (text: string): string => {
+  const formatDOB = (text: string): string => {
 
-    const cleaned = text.replace(/\D/g, '');
+    const cleaned = text.replace(/\D/g, '');
 
-    let formatted = '';
+    let formatted = '';
 
 
 
-    if (cleaned.length > 0) {
+    if (cleaned.length > 0) {
 
-      formatted = cleaned.slice(0, 2);
+      formatted = cleaned.slice(0, 2);
 
-    }
+    }
 
-    if (cleaned.length > 2) {
+    if (cleaned.length > 2) {
 
-      formatted += '/' + cleaned.slice(2, 4);
+      formatted += '/' + cleaned.slice(2, 4);
 
-    }
+    }
 
-    if (cleaned.length > 4) {
+    if (cleaned.length > 4) {
 
-      formatted += '/' + cleaned.slice(4, 8);
+      formatted += '/' + cleaned.slice(4, 8);
 
-    }
+    }
 
 
 
-    return formatted;
+    return formatted;
 
-  };
+  };
 
 
 
-  const handleDOBChange = (text: string) => {
+  const handleDOBChange = (text: string) => {
 
-    const formatted = formatDOB(text);
+    const formatted = formatDOB(text);
 
-    setDob(formatted);
+    setDob(formatted);
 
-  };
+  };
 
 
 
-  const handleSignup = async () => {
+  const handleSignup = async () => {
 
-    setError('');
+    setError('');
 
 
 
-    if (!username || !name || !dob || !email || !phoneNumber || !password || !confirmPassword) {
+    if (!username || !name || !dob || !email || !phoneNumber || !password || !confirmPassword) {
 
-      setError('All fields are required');
+      setError('All fields are required');
 
-      return;
+      return;
 
-    }
+    }
 
 
 
-    if (!validateUsername(username)) {
+    if (!validateUsername(username)) {
 
-      setError('Username must be at least 3 characters and contain only letters, numbers, and underscores');
+      setError('Username must be at least 3 characters and contain only letters, numbers, and underscores');
 
-      return;
+      return;
 
-    }
+    }
 
 
 
-    if (!validateEmail(email)) {
+    if (!validateEmail(email)) {
 
-      setError('Please enter a valid email address');
+      setError('Please enter a valid email address');
 
-      return;
+      return;
 
-    }
+    }
 
 
 
-    if (!validateDOB(dob)) {
+    if (!validateDOB(dob)) {
 
-      setError('Please enter date of birth in DD/MM/YYYY format');
+      setError('Please enter date of birth in DD/MM/YYYY format');
 
-      return;
+      return;
 
-    }
+    }
 
 
 
-    if (password.length < 6) {
+    if (password.length < 6) {
 
-      setError('Password must be at least 6 characters');
+      setError('Password must be at least 6 characters');
 
-      return;
+      return;
 
-    }
+    }
 
 
 
-    if (password !== confirmPassword) {
+    if (password !== confirmPassword) {
 
-      setError('Passwords do not match');
+      setError('Passwords do not match');
 
-      return;
+      return;
 
-    }
+    }
 
 
 
-    setLoading(true);
+    setLoading(true);
 
 
 
-    try {
+    try {
 
-      const { data: existingUsername } = await supabase
+      const { data: existingUsername } = await supabase
 
-        .from('profiles')
+        .from('profiles')
 
-        .select('username')
+        .select('username')
 
-        .eq('username', username)
+        .eq('username', username)
 
-        .maybeSingle();
+        .maybeSingle();
 
 
 
-      if (existingUsername) {
+      if (existingUsername) {
 
-        setError('Username already taken');
+        setError('Username already taken');
 
-        setLoading(false);
+        setLoading(false);
 
-        return;
+        return;
 
-      }
+      }
 
 
 
-      const { data: existingPhone } = await supabase
+      const { data: existingPhone } = await supabase
 
-        .from('profiles')
+        .from('profiles')
 
-        .select('phone_number')
+        .select('phone_number')
 
-        .eq('phone_number', phoneNumber)
+        .eq('phone_number', phoneNumber)
 
-        .maybeSingle();
+        .maybeSingle();
 
 
 
-      if (existingPhone) {
+      if (existingPhone) {
 
-        setError('Phone number already registered');
+        setError('Phone number already registered');
 
-        setLoading(false);
+        setLoading(false);
 
-        return;
+        return;
 
-      }
+      }
 
 
 
-      const { data: authData, error: signUpError } = await supabase.auth.signUp({
+      const { data: authData, error: signUpError } = await supabase.auth.signUp({
 
-        email,
+        email,
 
-        password,
+        password,
 
-      });
+      });
 
 
 
-      if (signUpError) {
+      if (signUpError) {
 
-        setError(signUpError.message);
+        setError(signUpError.message);
 
-        setLoading(false);
+        setLoading(false);
 
-        return;
+        return;
 
-      }
+      }
 
 
 
-      if (!authData.user) {
+      if (!authData.user) {
 
-        setError('Failed to create account');
+        setError('Failed to create account');
 
-        setLoading(false);
+        setLoading(false);
 
-        return;
+        return;
 
-      }
+      }
 
 
 
-      const [day, month, year] = dob.split('/');
+      const [day, month, year] = dob.split('/');
 
-      const dobDate = `${year}-${month}-${day}`;
+      const dobDate = `${year}-${month}-${day}`;
 
 
 
-      const { error: profileError } = await supabase.from('profiles').insert({
+      const { error: profileError } = await supabase.from('profiles').insert({
 
-        id: authData.user.id,
+        id: authData.user.id,
 
-        username,
+        username,
 
-        name,
+        name,
 
-        dob: dobDate,
+        dob: dobDate,
 
-        email,
+        email,
 
-        phone_number: phoneNumber,
+        phone_number: phoneNumber,
 
-      });
+      });
 
 
 
-      if (profileError) {
+      if (profileError) {
 
-        setError('Failed to create profile: ' + profileError.message);
+        setError('Failed to create profile: ' + profileError.message);
 
-        setLoading(false);
+        setLoading(false);
 
-        return;
+        return;
 
-      }
+      }
 
-    } catch (err) {
+    } catch (err) {
 
-      setError('An unexpected error occurred');
+      setError('An unexpected error occurred');
 
-      console.error(err);
+      console.error(err);
 
-    } finally {
+    } finally {
 
-      setLoading(false);
+      setLoading(false);
 
-    }
+    }
 
-  };
+  };
 
 
 
-  return (
+  return (
 
-    <KeyboardAvoidingView
+    <KeyboardAvoidingView
 
-      style={styles.container}
+      style={styles.container}
 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
 
-    >
+    >
 
-      <TouchableOpacity
+      <TouchableOpacity
 
-        style={styles.backButton}
+        style={styles.backButton}
 
-        onPress={() => navigation.goBack()}
+        onPress={() => navigation.goBack()}
 
-      >
+      >
 
-        <ArrowLeft size={24} color={theme.colors.text} />
+        <ArrowLeft size={24} color={theme.colors.text} />
 
-      </TouchableOpacity>
+      </TouchableOpacity>
 
 
 
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
 
-        <View style={styles.content}>
+        <View style={styles.content}>
 
-          <Text style={styles.title}>Create your student account</Text>
+          <Text style={styles.title}>Create your student account</Text>
 
-          <Text style={styles.subtitle}>Join the campus community</Text>
+          <Text style={styles.subtitle}>Join the campus community</Text>
 
 
 
-          {error ? (
+          {error ? (
 
-            <View style={styles.errorContainer}>
+            <View style={styles.errorContainer}>
 
-              <Text style={styles.errorText}>{error}</Text>
+              <Text style={styles.errorText}>{error}</Text>
 
-            </View>
+            </View>
 
-          ) : null}
+          ) : null}
 
 
 
-          <View style={styles.form}>
+          <View style={styles.form}>
 
-            <View style={styles.inputContainer}>
+            <View style={styles.inputContainer}>
 
-              <Text style={styles.label}>Username</Text>
+              <Text style={styles.label}>Username</Text>
 
-              <TextInput
+              <TextInput
 
-                style={styles.input}
+                style={styles.input}
 
-                placeholder="Enter a unique username"
+                placeholder="Enter a unique username"
 
-                value={username}
+                value={username}
 
-                onChangeText={setUsername}
+                onChangeText={setUsername}
 
-                autoCapitalize="none"
+                autoCapitalize="none"
 
-                autoCorrect={false}
+                autoCorrect={false}
 
-                placeholderTextColor={theme.colors.textMuted}
+                placeholderTextColor={theme.colors.textMuted}
 
-              />
+              />
 
-              <Text style={styles.helperText}>No spaces or special characters except underscore</Text>
+              <Text style={styles.helperText}>No spaces or special characters except underscore</Text>
 
-            </View>
+            </View>
 
 
 
-            <View style={styles.inputContainer}>
+            <View style={styles.inputContainer}>
 
-              <Text style={styles.label}>Full Name</Text>
+              <Text style={styles.label}>Full Name</Text>
 
-              <TextInput
+              <TextInput
 
-                style={styles.input}
+                style={styles.input}
 
-                placeholder="Enter your full name"
+                placeholder="Enter your full name"
 
-                value={name}
+                value={name}
 
-                onChangeText={setName}
+                onChangeText={setName}
 
-                placeholderTextColor={theme.colors.textMuted}
+                placeholderTextColor={theme.colors.textMuted}
 
-              />
+              />
 
-            </View>
+            </View>
 
 
 
-            <View style={styles.inputContainer}>
+            <View style={styles.inputContainer}>
 
-              <Text style={styles.label}>Date of Birth</Text>
+              <Text style={styles.label}>Date of Birth</Text>
 
-              <TextInput
+              <TextInput
 
-                style={styles.input}
+                style={styles.input}
 
-                placeholder="DD/MM/YYYY"
+                placeholder="DD/MM/YYYY"
 
-                value={dob}
+                value={dob}
 
-                onChangeText={handleDOBChange}
+                onChangeText={handleDOBChange}
 
-                keyboardType="numeric"
+                keyboardType="numeric"
 
-                maxLength={10}
+                maxLength={10}
 
-                placeholderTextColor={theme.colors.textMuted}
+                placeholderTextColor={theme.colors.textMuted}
 
-              />
+              />
 
-              <Text style={styles.helperText}>Format: DD/MM/YYYY (automatically formatted)</Text>
+              <Text style={styles.helperText}>Format: DD/MM/YYYY (automatically formatted)</Text>
 
-            </View>
+            </View>
 
 
 
-            <View style={styles.inputContainer}>
+            <View style={styles.inputContainer}>
 
-              <Text style={styles.label}>Email</Text>
+              <Text style={styles.label}>Email</Text>
 
-              <TextInput
+              <TextInput
 
-                style={styles.input}
+                style={styles.input}
 
-                placeholder="your.email@gmail.com"
+                placeholder="your.email@gmail.com"
 
-                value={email}
+                value={email}
 
-                onChangeText={setEmail}
+                onChangeText={setEmail}
 
-                keyboardType="email-address"
+                keyboardType="email-address"
 
-                autoCapitalize="none"
+                autoCapitalize="none"
 
-                autoCorrect={false}
+                autoCorrect={false}
 
-                placeholderTextColor={theme.colors.textMuted}
+                placeholderTextColor={theme.colors.textMuted}
 
-              />
+              />
 
-            </View>
+            </View>
 
 
 
-            <View style={styles.inputContainer}>
+            <View style={styles.inputContainer}>
 
-              <Text style={styles.label}>Phone Number</Text>
+              <Text style={styles.label}>Phone Number</Text>
 
-              <TextInput
+              <TextInput
 
-                style={styles.input}
+                style={styles.input}
 
-                placeholder="Enter your phone number"
+                placeholder="Enter your phone number"
 
-                value={phoneNumber}
+                value={phoneNumber}
 
-                onChangeText={setPhoneNumber}
+                onChangeText={setPhoneNumber}
 
-                keyboardType="phone-pad"
+                keyboardType="phone-pad"
 
-                placeholderTextColor={theme.colors.textMuted}
+                placeholderTextColor={theme.colors.textMuted}
 
-              />
+              />
 
-            </View>
+            </View>
 
 
 
-            <View style={styles.inputContainer}>
+            <View style={styles.inputContainer}>
 
-              <Text style={styles.label}>Password</Text>
+              <Text style={styles.label}>Password</Text>
 
-              <TextInput
+              <TextInput
 
-                style={styles.input}
+                style={styles.input}
 
-                placeholder="Create a password"
+                placeholder="Create a password"
 
-                value={password}
+                value={password}
 
-                onChangeText={setPassword}
+                onChangeText={setPassword}
 
-                secureTextEntry
+                secureTextEntry
 
-                autoCapitalize="none"
+                autoCapitalize="none"
 
-                autoCorrect={false}
+                autoCorrect={false}
 
-                placeholderTextColor={theme.colors.textMuted}
+                placeholderTextColor={theme.colors.textMuted}
 
-              />
+              />
 
-            </View>
+            </View>
 
 
 
-            <View style={styles.inputContainer}>
+            <View style={styles.inputContainer}>
 
-              <Text style={styles.label}>Confirm Password</Text>
+              <Text style={styles.label}>Confirm Password</Text>
 
-              <TextInput
+              <TextInput
 
-                style={styles.input}
+                style={styles.input}
 
-                placeholder="Re-enter password"
+                placeholder="Re-enter password"
 
-                value={confirmPassword}
+                value={confirmPassword}
 
-                onChangeText={setConfirmPassword}
+                onChangeText={setConfirmPassword}
 
-                secureTextEntry
+                secureTextEntry
 
-                autoCapitalize="none"
+                autoCapitalize="none"
 
-                autoCorrect={false}
+                autoCorrect={false}
 
-                placeholderTextColor={theme.colors.textMuted}
+                placeholderTextColor={theme.colors.textMuted}
 
-              />
+              />
 
-            </View>
+            </View>
 
 
 
-            <PrimaryButton
+            <PrimaryButton
 
-              title={loading ? "Creating Account..." : "Sign Up"}
+              title={loading ? "Creating Account..." : "Sign Up"}
 
-              onPress={handleSignup}
+              onPress={handleSignup}
 
-              disabled={loading}
+              disabled={loading}
 
-              style={{ marginTop: theme.spacing.lg }}
+              style={{ marginTop: theme.spacing.lg }}
 
-            />
+            />
 
 
 
-            <TouchableOpacity
+            <TouchableOpacity
 
-              onPress={() => navigation.navigate('Welcome')}
+              onPress={() => navigation.navigate('Welcome')}
 
-              style={styles.loginLinkBottom}
+              style={styles.loginLinkBottom}
 
-            >
+            >
 
-              <Text style={styles.loginLinkText}>
+              <Text style={styles.loginLinkText}>
 
-                Already have an account? <Text style={styles.loginLinkBold}>Log in</Text>
+                Already have an account? <Text style={styles.loginLinkBold}>Log in</Text>
 
-              </Text>
+              </Text>
 
-            </TouchableOpacity>
+            </TouchableOpacity>
 
-          </View>
+          </View>
 
-        </View>
+        </View>
 
-      </ScrollView>
+      </ScrollView>
 
-    </KeyboardAvoidingView>
+    </KeyboardAvoidingView>
 
-  );
+  );
 
 };
 
@@ -600,971 +600,184 @@ export const SignupScreen = ({ navigation }: Props) => {
 
 const styles = StyleSheet.create({
 
-  container: {
+  container: {
 
-    flex: 1,
+    flex: 1,
 
-    backgroundColor: theme.colors.white,
+    backgroundColor: theme.colors.white,
 
-  },
+  },
 
-  backButton: {
+  backButton: {
 
-    position: 'absolute',
+    position: 'absolute',
 
-    top: 48,
+    top: 48,
 
-    left: 16,
+    left: 16,
 
-    zIndex: 10,
+    zIndex: 10,
 
-    width: 40,
+    width: 40,
 
-    height: 40,
+    height: 40,
 
-    borderRadius: 20,
+    borderRadius: 20,
 
-    backgroundColor: theme.colors.white,
+    backgroundColor: theme.colors.white,
 
-    justifyContent: 'center',
+    justifyContent: 'center',
 
-    alignItems: 'center',
+    alignItems: 'center',
 
-    ...theme.shadows.sm,
+    ...theme.shadows.sm,
 
-  },
+  },
 
-  scrollContent: {
+  scrollContent: {
 
-    flexGrow: 1,
+    flexGrow: 1,
 
-  },
+  },
 
-  content: {
+  content: {
 
-    flex: 1,
+    flex: 1,
 
-    paddingHorizontal: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.lg,
 
-    paddingTop: theme.spacing.xxl * 2,
+    paddingTop: theme.spacing.xxl * 2,
 
-    paddingBottom: theme.spacing.xl,
+    paddingBottom: theme.spacing.xl,
 
-  },
+  },
 
-  title: {
+  title: {
 
-    fontSize: theme.fontSize.xxxl,
+    fontSize: theme.fontSize.xxxl,
 
-    fontWeight: theme.fontWeight.bold,
+    fontWeight: theme.fontWeight.bold,
 
-    color: theme.colors.text,
+    color: theme.colors.text,
 
-    marginBottom: theme.spacing.xs,
+    marginBottom: theme.spacing.xs,
 
-  },
+  },
 
-  subtitle: {
+  subtitle: {
 
-    fontSize: theme.fontSize.md,
+    fontSize: theme.fontSize.md,
 
-    color: theme.colors.textLight,
+    color: theme.colors.textLight,
 
-    marginBottom: theme.spacing.md,
+    marginBottom: theme.spacing.md,
 
-  },
+  },
 
-  errorContainer: {
+  errorContainer: {
 
-    backgroundColor: '#fee',
+    backgroundColor: '#fee',
 
-    padding: theme.spacing.md,
+    padding: theme.spacing.md,
 
-    borderRadius: theme.borderRadius.md,
+    borderRadius: theme.borderRadius.md,
 
-    marginBottom: theme.spacing.md,
+    marginBottom: theme.spacing.md,
 
-    borderWidth: 1,
+    borderWidth: 1,
 
-    borderColor: '#fcc',
+    borderColor: '#fcc',
 
-  },
+  },
 
-  errorText: {
+  errorText: {
 
-    color: '#c00',
+    color: '#c00',
 
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.sm,
 
-    textAlign: 'center',
+    textAlign: 'center',
 
-  },
+  },
 
-  form: {
+  form: {
 
-    marginTop: theme.spacing.sm,
+    marginTop: theme.spacing.sm,
 
-  },
+  },
 
-  inputContainer: {
+  inputContainer: {
 
-    marginBottom: theme.spacing.md,
+    marginBottom: theme.spacing.md,
 
-  },
+  },
 
-  label: {
+  label: {
 
-    fontSize: theme.fontSize.md,
+    fontSize: theme.fontSize.md,
 
-    fontWeight: theme.fontWeight.medium,
+    fontWeight: theme.fontWeight.medium,
 
-    color: theme.colors.text,
+    color: theme.colors.text,
 
-    marginBottom: theme.spacing.sm,
+    marginBottom: theme.spacing.sm,
 
-  },
+  },
 
-  input: {
+  input: {
 
-    backgroundColor: theme.colors.backgroundLight,
+    backgroundColor: theme.colors.backgroundLight,
 
-    borderRadius: theme.borderRadius.lg,
+    borderRadius: theme.borderRadius.lg,
 
-    paddingHorizontal: theme.spacing.md,
+    paddingHorizontal: theme.spacing.md,
 
-    paddingVertical: theme.spacing.md,
+    paddingVertical: theme.spacing.md,
 
-    fontSize: theme.fontSize.md,
+    fontSize: theme.fontSize.md,
 
-    color: theme.colors.text,
+    color: theme.colors.text,
 
-    borderWidth: 1,
+    borderWidth: 1,
 
-    borderColor: theme.colors.border,
+    borderColor: theme.colors.border,
 
-  },
+  },
 
-  helperText: {
+  helperText: {
 
-    fontSize: theme.fontSize.xs,
+    fontSize: theme.fontSize.xs,
 
-    color: theme.colors.textMuted,
+    color: theme.colors.textMuted,
 
-    marginTop: theme.spacing.xs,
+    marginTop: theme.spacing.xs,
 
-  },
+  },
 
-  loginLinkBottom: {
+  loginLinkBottom: {
 
-    alignSelf: 'center',
+    alignSelf: 'center',
 
-    marginTop: theme.spacing.xl,
+    marginTop: theme.spacing.xl,
 
-  },
+  },
 
-  loginLinkText: {
+  loginLinkText: {
 
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.sm,
 
-    color: theme.colors.textLight,
+    color: theme.colors.textLight,
 
-    textAlign: 'center',
+    textAlign: 'center',
 
-  },
+  },
 
-  loginLinkBold: {
+  loginLinkBold: {
 
-    color: theme.colors.primary,
+    color: theme.colors.primary,
 
-    fontWeight: theme.fontWeight.semibold,
+    fontWeight: theme.fontWeight.semibold,
 
-  },
+  },
 
 });
-
-THIS IS THE OLD CODE DON'T CHANGE ANY LOGIC IN THIS CODE YOU JUST ONLY DO THE REQUIRED CHANGES IN THE CODE TO FIX ERROR  SHOWN IN THE SCREENSHOT.
-
-GIVE THE REST OF THE CODE SAME ONLY FIX THE ERROR import React, { useState } from 'react';
-
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
-
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
-
-import { AuthStackParamList } from '../types';
-
-import { theme } from '../theme';
-
-import { PrimaryButton } from '../components/PrimaryButton';
-
-import { supabase } from '../lib/supabase';
-
-import { ArrowLeft } from 'lucide-react-native';
-
-
-
-type Props = NativeStackScreenProps<AuthStackParamList, 'Signup'>;
-
-
-
-export const SignupScreen = ({ navigation }: Props) => {
-
-  const [username, setUsername] = useState('');
-
-  const [name, setName] = useState('');
-
-  const [dob, setDob] = useState('');
-
-  const [email, setEmail] = useState('');
-
-  const [phoneNumber, setPhoneNumber] = useState('');
-
-  const [password, setPassword] = useState('');
-
-  const [confirmPassword, setConfirmPassword] = useState('');
-
-  const [loading, setLoading] = useState(false);
-
-  const [error, setError] = useState('');
-
-
-
-  const validateUsername = (username: string): boolean => {
-
-    const usernameRegex = /^[a-zA-Z0-9_]+$/;
-
-    return usernameRegex.test(username) && username.length >= 3;
-
-  };
-
-
-
-  const validateEmail = (email: string): boolean => {
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-    return emailRegex.test(email);
-
-  };
-
-
-
-  const validateDOB = (dob: string): boolean => {
-
-    const dobRegex = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/;
-
-    return dobRegex.test(dob);
-
-  };
-
-
-
-  const formatDOB = (text: string): string => {
-
-    const cleaned = text.replace(/\D/g, '');
-
-    let formatted = '';
-
-
-
-    if (cleaned.length > 0) {
-
-      formatted = cleaned.slice(0, 2);
-
-    }
-
-    if (cleaned.length > 2) {
-
-      formatted += '/' + cleaned.slice(2, 4);
-
-    }
-
-    if (cleaned.length > 4) {
-
-      formatted += '/' + cleaned.slice(4, 8);
-
-    }
-
-
-
-    return formatted;
-
-  };
-
-
-
-  const handleDOBChange = (text: string) => {
-
-    const formatted = formatDOB(text);
-
-    setDob(formatted);
-
-  };
-
-
-
-  const handleSignup = async () => {
-
-    setError('');
-
-
-
-    if (!username || !name || !dob || !email || !phoneNumber || !password || !confirmPassword) {
-
-      setError('All fields are required');
-
-      return;
-
-    }
-
-
-
-    if (!validateUsername(username)) {
-
-      setError('Username must be at least 3 characters and contain only letters, numbers, and underscores');
-
-      return;
-
-    }
-
-
-
-    if (!validateEmail(email)) {
-
-      setError('Please enter a valid email address');
-
-      return;
-
-    }
-
-
-
-    if (!validateDOB(dob)) {
-
-      setError('Please enter date of birth in DD/MM/YYYY format');
-
-      return;
-
-    }
-
-
-
-    if (password.length < 6) {
-
-      setError('Password must be at least 6 characters');
-
-      return;
-
-    }
-
-
-
-    if (password !== confirmPassword) {
-
-      setError('Passwords do not match');
-
-      return;
-
-    }
-
-
-
-    setLoading(true);
-
-
-
-    try {
-
-      const { data: existingUsername } = await supabase
-
-        .from('profiles')
-
-        .select('username')
-
-        .eq('username', username)
-
-        .maybeSingle();
-
-
-
-      if (existingUsername) {
-
-        setError('Username already taken');
-
-        setLoading(false);
-
-        return;
-
-      }
-
-
-
-      const { data: existingPhone } = await supabase
-
-        .from('profiles')
-
-        .select('phone_number')
-
-        .eq('phone_number', phoneNumber)
-
-        .maybeSingle();
-
-
-
-      if (existingPhone) {
-
-        setError('Phone number already registered');
-
-        setLoading(false);
-
-        return;
-
-      }
-
-
-
-      const { data: authData, error: signUpError } = await supabase.auth.signUp({
-
-        email,
-
-        password,
-
-      });
-
-
-
-      if (signUpError) {
-
-        setError(signUpError.message);
-
-        setLoading(false);
-
-        return;
-
-      }
-
-
-
-      if (!authData.user) {
-
-        setError('Failed to create account');
-
-        setLoading(false);
-
-        return;
-
-      }
-
-
-
-      const [day, month, year] = dob.split('/');
-
-      const dobDate = `${year}-${month}-${day}`;
-
-
-
-      const { error: profileError } = await supabase.from('profiles').insert({
-
-        id: authData.user.id,
-
-        username,
-
-        name,
-
-        dob: dobDate,
-
-        email,
-
-        phone_number: phoneNumber,
-
-      });
-
-
-
-      if (profileError) {
-
-        setError('Failed to create profile: ' + profileError.message);
-
-        setLoading(false);
-
-        return;
-
-      }
-
-    } catch (err) {
-
-      setError('An unexpected error occurred');
-
-      console.error(err);
-
-    } finally {
-
-      setLoading(false);
-
-    }
-
-  };
-
-
-
-  return (
-
-    <KeyboardAvoidingView
-
-      style={styles.container}
-
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-
-    >
-
-      <TouchableOpacity
-
-        style={styles.backButton}
-
-        onPress={() => navigation.goBack()}
-
-      >
-
-        <ArrowLeft size={24} color={theme.colors.text} />
-
-      </TouchableOpacity>
-
-
-
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-
-        <View style={styles.content}>
-
-          <Text style={styles.title}>Create your student account</Text>
-
-          <Text style={styles.subtitle}>Join the campus community</Text>
-
-
-
-          {error ? (
-
-            <View style={styles.errorContainer}>
-
-              <Text style={styles.errorText}>{error}</Text>
-
-            </View>
-
-          ) : null}
-
-
-
-          <View style={styles.form}>
-
-            <View style={styles.inputContainer}>
-
-              <Text style={styles.label}>Username</Text>
-
-              <TextInput
-
-                style={styles.input}
-
-                placeholder="Enter a unique username"
-
-                value={username}
-
-                onChangeText={setUsername}
-
-                autoCapitalize="none"
-
-                autoCorrect={false}
-
-                placeholderTextColor={theme.colors.textMuted}
-
-              />
-
-              <Text style={styles.helperText}>No spaces or special characters except underscore</Text>
-
-            </View>
-
-
-
-            <View style={styles.inputContainer}>
-
-              <Text style={styles.label}>Full Name</Text>
-
-              <TextInput
-
-                style={styles.input}
-
-                placeholder="Enter your full name"
-
-                value={name}
-
-                onChangeText={setName}
-
-                placeholderTextColor={theme.colors.textMuted}
-
-              />
-
-            </View>
-
-
-
-            <View style={styles.inputContainer}>
-
-              <Text style={styles.label}>Date of Birth</Text>
-
-              <TextInput
-
-                style={styles.input}
-
-                placeholder="DD/MM/YYYY"
-
-                value={dob}
-
-                onChangeText={handleDOBChange}
-
-                keyboardType="numeric"
-
-                maxLength={10}
-
-                placeholderTextColor={theme.colors.textMuted}
-
-              />
-
-              <Text style={styles.helperText}>Format: DD/MM/YYYY (automatically formatted)</Text>
-
-            </View>
-
-
-
-            <View style={styles.inputContainer}>
-
-              <Text style={styles.label}>Email</Text>
-
-              <TextInput
-
-                style={styles.input}
-
-                placeholder="your.email@gmail.com"
-
-                value={email}
-
-                onChangeText={setEmail}
-
-                keyboardType="email-address"
-
-                autoCapitalize="none"
-
-                autoCorrect={false}
-
-                placeholderTextColor={theme.colors.textMuted}
-
-              />
-
-            </View>
-
-
-
-            <View style={styles.inputContainer}>
-
-              <Text style={styles.label}>Phone Number</Text>
-
-              <TextInput
-
-                style={styles.input}
-
-                placeholder="Enter your phone number"
-
-                value={phoneNumber}
-
-                onChangeText={setPhoneNumber}
-
-                keyboardType="phone-pad"
-
-                placeholderTextColor={theme.colors.textMuted}
-
-              />
-
-            </View>
-
-
-
-            <View style={styles.inputContainer}>
-
-              <Text style={styles.label}>Password</Text>
-
-              <TextInput
-
-                style={styles.input}
-
-                placeholder="Create a password"
-
-                value={password}
-
-                onChangeText={setPassword}
-
-                secureTextEntry
-
-                autoCapitalize="none"
-
-                autoCorrect={false}
-
-                placeholderTextColor={theme.colors.textMuted}
-
-              />
-
-            </View>
-
-
-
-            <View style={styles.inputContainer}>
-
-              <Text style={styles.label}>Confirm Password</Text>
-
-              <TextInput
-
-                style={styles.input}
-
-                placeholder="Re-enter password"
-
-                value={confirmPassword}
-
-                onChangeText={setConfirmPassword}
-
-                secureTextEntry
-
-                autoCapitalize="none"
-
-                autoCorrect={false}
-
-                placeholderTextColor={theme.colors.textMuted}
-
-              />
-
-            </View>
-
-
-
-            <PrimaryButton
-
-              title={loading ? "Creating Account..." : "Sign Up"}
-
-              onPress={handleSignup}
-
-              disabled={loading}
-
-              style={{ marginTop: theme.spacing.lg }}
-
-            />
-
-
-
-            <TouchableOpacity
-
-              onPress={() => navigation.navigate('Welcome')}
-
-              style={styles.loginLinkBottom}
-
-            >
-
-              <Text style={styles.loginLinkText}>
-
-                Already have an account? <Text style={styles.loginLinkBold}>Log in</Text>
-
-              </Text>
-
-            </TouchableOpacity>
-
-          </View>
-
-        </View>
-
-      </ScrollView>
-
-    </KeyboardAvoidingView>
-
-  );
-
-};
-
-
-
-const styles = StyleSheet.create({
-
-  container: {
-
-    flex: 1,
-
-    backgroundColor: theme.colors.white,
-
-  },
-
-  backButton: {
-
-    position: 'absolute',
-
-    top: 48,
-
-    left: 16,
-
-    zIndex: 10,
-
-    width: 40,
-
-    height: 40,
-
-    borderRadius: 20,
-
-    backgroundColor: theme.colors.white,
-
-    justifyContent: 'center',
-
-    alignItems: 'center',
-
-    ...theme.shadows.sm,
-
-  },
-
-  scrollContent: {
-
-    flexGrow: 1,
-
-  },
-
-  content: {
-
-    flex: 1,
-
-    paddingHorizontal: theme.spacing.lg,
-
-    paddingTop: theme.spacing.xxl * 2,
-
-    paddingBottom: theme.spacing.xl,
-
-  },
-
-  title: {
-
-    fontSize: theme.fontSize.xxxl,
-
-    fontWeight: theme.fontWeight.bold,
-
-    color: theme.colors.text,
-
-    marginBottom: theme.spacing.xs,
-
-  },
-
-  subtitle: {
-
-    fontSize: theme.fontSize.md,
-
-    color: theme.colors.textLight,
-
-    marginBottom: theme.spacing.md,
-
-  },
-
-  errorContainer: {
-
-    backgroundColor: '#fee',
-
-    padding: theme.spacing.md,
-
-    borderRadius: theme.borderRadius.md,
-
-    marginBottom: theme.spacing.md,
-
-    borderWidth: 1,
-
-    borderColor: '#fcc',
-
-  },
-
-  errorText: {
-
-    color: '#c00',
-
-    fontSize: theme.fontSize.sm,
-
-    textAlign: 'center',
-
-  },
-
-  form: {
-
-    marginTop: theme.spacing.sm,
-
-  },
-
-  inputContainer: {
-
-    marginBottom: theme.spacing.md,
-
-  },
-
-  label: {
-
-    fontSize: theme.fontSize.md,
-
-    fontWeight: theme.fontWeight.medium,
-
-    color: theme.colors.text,
-
-    marginBottom: theme.spacing.sm,
-
-  },
-
-  input: {
-
-    backgroundColor: theme.colors.backgroundLight,
-
-    borderRadius: theme.borderRadius.lg,
-
-    paddingHorizontal: theme.spacing.md,
-
-    paddingVertical: theme.spacing.md,
-
-    fontSize: theme.fontSize.md,
-
-    color: theme.colors.text,
-
-    borderWidth: 1,
-
-    borderColor: theme.colors.border,
-
-  },
-
-  helperText: {
-
-    fontSize: theme.fontSize.xs,
-
-    color: theme.colors.textMuted,
-
-    marginTop: theme.spacing.xs,
-
-  },
-
-  loginLinkBottom: {
-
-    alignSelf: 'center',
-
-    marginTop: theme.spacing.xl,
-
-  },
-
-  loginLinkText: {
-
-    fontSize: theme.fontSize.sm,
-
-    color: theme.colors.textLight,
-
-    textAlign: 'center',
-
-  },
-
-  loginLinkBold: {
-
-    color: theme.colors.primary,
-
-    fontWeight: theme.fontWeight.semibold,
-
-  },
-
-});
-
