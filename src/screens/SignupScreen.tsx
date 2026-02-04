@@ -22,15 +22,7 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'Signup'>;
 
 export const SignupScreen = ({ navigation }: Props) => {
 
-  const [username, setUsername] = useState('');
-
-  const [name, setName] = useState('');
-
-  const [dob, setDob] = useState('');
-
   const [email, setEmail] = useState('');
-
-  const [phoneNumber, setPhoneNumber] = useState('');
 
   const [password, setPassword] = useState('');
 
@@ -39,16 +31,6 @@ export const SignupScreen = ({ navigation }: Props) => {
   const [loading, setLoading] = useState(false);
 
   const [error, setError] = useState('');
-
-
-
-  const validateUsername = (username: string): boolean => {
-
-    const usernameRegex = /^[a-zA-Z0-9_]+$/;
-
-    return usernameRegex.test(username) && username.length >= 3;
-
-  };
 
 
 
@@ -62,79 +44,15 @@ export const SignupScreen = ({ navigation }: Props) => {
 
 
 
-  const validateDOB = (dob: string): boolean => {
-
-    const dobRegex = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/;
-
-    return dobRegex.test(dob);
-
-  };
-
-
-
-  const formatDOB = (text: string): string => {
-
-    const cleaned = text.replace(/\D/g, '');
-
-    let formatted = '';
-
-
-
-    if (cleaned.length > 0) {
-
-      formatted = cleaned.slice(0, 2);
-
-    }
-
-    if (cleaned.length > 2) {
-
-      formatted += '/' + cleaned.slice(2, 4);
-
-    }
-
-    if (cleaned.length > 4) {
-
-      formatted += '/' + cleaned.slice(4, 8);
-
-    }
-
-
-
-    return formatted;
-
-  };
-
-
-
-  const handleDOBChange = (text: string) => {
-
-    const formatted = formatDOB(text);
-
-    setDob(formatted);
-
-  };
-
-
-
   const handleSignup = async () => {
 
     setError('');
 
 
 
-    if (!username || !name || !dob || !email || !phoneNumber || !password || !confirmPassword) {
+    if (!email || !password || !confirmPassword) {
 
       setError('All fields are required');
-
-      return;
-
-    }
-
-
-
-    if (!validateUsername(username)) {
-
-      setError('Username must be at least 3 characters and contain only letters, numbers, and underscores');
 
       return;
 
@@ -145,16 +63,6 @@ export const SignupScreen = ({ navigation }: Props) => {
     if (!validateEmail(email)) {
 
       setError('Please enter a valid email address');
-
-      return;
-
-    }
-
-
-
-    if (!validateDOB(dob)) {
-
-      setError('Please enter date of birth in DD/MM/YYYY format');
 
       return;
 
@@ -188,55 +96,7 @@ export const SignupScreen = ({ navigation }: Props) => {
 
     try {
 
-      const { data: existingUsername } = await supabase
-
-        .from('profiles')
-
-        .select('username')
-
-        .eq('username', username)
-
-        .maybeSingle();
-
-
-
-      if (existingUsername) {
-
-        setError('Username already taken');
-
-        setLoading(false);
-
-        return;
-
-      }
-
-
-
-      const { data: existingPhone } = await supabase
-
-        .from('profiles')
-
-        .select('phone_number')
-
-        .eq('phone_number', phoneNumber)
-
-        .maybeSingle();
-
-
-
-      if (existingPhone) {
-
-        setError('Phone number already registered');
-
-        setLoading(false);
-
-        return;
-
-      }
-
-
-
-      const { data: authData, error: signUpError } = await supabase.auth.signUp({
+      const { error: signUpError } = await supabase.auth.signUp({
 
         email,
 
@@ -249,54 +109,6 @@ export const SignupScreen = ({ navigation }: Props) => {
       if (signUpError) {
 
         setError(signUpError.message);
-
-        setLoading(false);
-
-        return;
-
-      }
-
-
-
-      if (!authData.user) {
-
-        setError('Failed to create account');
-
-        setLoading(false);
-
-        return;
-
-      }
-
-
-
-      const [day, month, year] = dob.split('/');
-
-      const dobDate = `${year}-${month}-${day}`;
-
-
-
-      const { error: profileError } = await supabase.from('profiles').insert({
-
-        id: authData.user.id,
-
-        username,
-
-        name,
-
-        dob: dobDate,
-
-        email,
-
-        phone_number: phoneNumber,
-
-      });
-
-
-
-      if (profileError) {
-
-        setError('Failed to create profile: ' + profileError.message);
 
         setLoading(false);
 
@@ -370,84 +182,6 @@ export const SignupScreen = ({ navigation }: Props) => {
 
             <View style={styles.inputContainer}>
 
-              <Text style={styles.label}>Username</Text>
-
-              <TextInput
-
-                style={styles.input}
-
-                placeholder="Enter a unique username"
-
-                value={username}
-
-                onChangeText={setUsername}
-
-                autoCapitalize="none"
-
-                autoCorrect={false}
-
-                placeholderTextColor={theme.colors.textMuted}
-
-              />
-
-              <Text style={styles.helperText}>No spaces or special characters except underscore</Text>
-
-            </View>
-
-
-
-            <View style={styles.inputContainer}>
-
-              <Text style={styles.label}>Full Name</Text>
-
-              <TextInput
-
-                style={styles.input}
-
-                placeholder="Enter your full name"
-
-                value={name}
-
-                onChangeText={setName}
-
-                placeholderTextColor={theme.colors.textMuted}
-
-              />
-
-            </View>
-
-
-
-            <View style={styles.inputContainer}>
-
-              <Text style={styles.label}>Date of Birth</Text>
-
-              <TextInput
-
-                style={styles.input}
-
-                placeholder="DD/MM/YYYY"
-
-                value={dob}
-
-                onChangeText={handleDOBChange}
-
-                keyboardType="numeric"
-
-                maxLength={10}
-
-                placeholderTextColor={theme.colors.textMuted}
-
-              />
-
-              <Text style={styles.helperText}>Format: DD/MM/YYYY (automatically formatted)</Text>
-
-            </View>
-
-
-
-            <View style={styles.inputContainer}>
-
               <Text style={styles.label}>Email</Text>
 
               <TextInput
@@ -465,30 +199,6 @@ export const SignupScreen = ({ navigation }: Props) => {
                 autoCapitalize="none"
 
                 autoCorrect={false}
-
-                placeholderTextColor={theme.colors.textMuted}
-
-              />
-
-            </View>
-
-
-
-            <View style={styles.inputContainer}>
-
-              <Text style={styles.label}>Phone Number</Text>
-
-              <TextInput
-
-                style={styles.input}
-
-                placeholder="Enter your phone number"
-
-                value={phoneNumber}
-
-                onChangeText={setPhoneNumber}
-
-                keyboardType="phone-pad"
 
                 placeholderTextColor={theme.colors.textMuted}
 
